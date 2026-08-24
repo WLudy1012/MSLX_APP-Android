@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
+import com.mslx.console.data.AppLogger
 import com.mslx.console.data.model.InstanceSummary
 import com.mslx.console.data.model.NodeStatsPayload
 import com.mslx.console.data.model.SystemInfo
@@ -90,20 +91,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
             // 地址归一化：默认强制 HTTPS；该 Daemon 勾选"允许 HTTP"时保留明文地址
             val normalizedUrl = ApiClient.normalizeDaemonUrl(daemon.baseUrl, daemon.allowHttp)
-            val connected = runCatching {
+            val result = runCatching {
                 repository.configure(normalizedUrl, daemon.apiKey, daemon.allowHttp)
                 repository.verify()
-            }.isSuccess
+            }
+            val connected = result.isSuccess
             if (connected) {
                 // 若地址被规范化（如 http 升级 https），同步回写存储，避免下次仍用旧地址
                 if (normalizedUrl != daemon.baseUrl) {
                     store.upsertDaemon(daemon.copy(baseUrl = normalizedUrl))
                 }
                 _state.update { it.copy(connecting = false, connected = true, error = null) }
+                AppLogger.i("Home", "连接成功 $normalizedUrl")
                 refreshMetrics()
                 refreshInstances()
                 startMonitor()
             } else {
+                result.exceptionOrNull()?.let { AppLogger.w("Home", "连接失败 $normalizedUrl", it) }
                 _state.update {
                     it.copy(
                         connecting = false,

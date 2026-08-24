@@ -6,6 +6,7 @@ import com.mslx.console.data.model.AdminCreateUserRequest
 import com.mslx.console.data.model.CancelCreationRequest
 import com.mslx.console.data.model.CreateServerData
 import com.mslx.console.data.model.CreateServerRequest
+import com.mslx.console.data.model.DeleteServerRequest
 import com.mslx.console.data.model.AdminUpdateUserRequest
 import com.mslx.console.data.model.FileItem
 import com.mslx.console.data.model.FrpSummary
@@ -53,10 +54,9 @@ interface MslxApi {
     @POST("api/instance/createServer")
     suspend fun createServer(@Body body: CreateServerRequest): ApiResponse<CreateServerData>
 
-    @POST("api/instance/delete/{id}")
+    @POST("api/instance/delete")
     suspend fun deleteInstance(
-        @Path("id") id: Long,
-        @Query("deleteFiles") deleteFiles: Boolean = false,
+        @Body body: DeleteServerRequest,
     ): ApiResponse<Any?>
 
     @POST("api/instance/cancelCreation")

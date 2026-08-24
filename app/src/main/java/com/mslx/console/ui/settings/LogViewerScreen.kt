@@ -1,5 +1,6 @@
 package com.mslx.console.ui.settings
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -38,13 +40,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mslx.console.data.AppLogger
 
-/** 运行日志二级页：查看 / 复制 / 清空应用日志。 */
+/** 运行日志二级页：查看 / 复制 / 导出 / 清空应用日志。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogViewerScreen(onBack: () -> Unit) {
     var logs by remember { mutableStateOf(AppLogger.getLogs()) }
     var confirmClear by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -75,6 +78,10 @@ fun LogViewerScreen(onBack: () -> Unit) {
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                 OutlinedButton(onClick = { clipboard.setText(AnnotatedString(logs)) }) {
                     Text("复制日志")
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { exportLogs(context, logs) }) {
+                    Text("导出日志")
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -114,5 +121,18 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 TextButton(onClick = { confirmClear = false }) { Text("取消") }
             },
         )
+    }
+}
+
+/** 通过系统分享面板导出日志文本。 */
+private fun exportLogs(context: android.content.Context, logs: String) {
+    runCatching {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "MSLX 控制台运行日志")
+            putExtra(Intent.EXTRA_TEXT, logs)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(Intent.createChooser(intent, "导出日志"))
     }
 }

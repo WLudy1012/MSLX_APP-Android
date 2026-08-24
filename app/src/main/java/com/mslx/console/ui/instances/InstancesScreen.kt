@@ -200,6 +200,7 @@ fun InstancesScreen(
     pendingDelete?.let { target ->
         var confirmation by remember(target.id) { mutableStateOf("") }
         var deleteFiles by remember(target.id) { mutableStateOf(false) }
+        val deleteError = state.deleteError
         AlertDialog(
             onDismissRequest = { if (!state.deleting) pendingDelete = null },
             title = { Text("删除实例") },
@@ -210,6 +211,13 @@ fun InstancesScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(deleteFiles, { deleteFiles = it })
                         Text("同时删除磁盘上的服务端数据文件")
+                    }
+                    if (!deleteError.isNullOrBlank()) {
+                        Text(
+                            text = deleteError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
                     }
                 }
             },

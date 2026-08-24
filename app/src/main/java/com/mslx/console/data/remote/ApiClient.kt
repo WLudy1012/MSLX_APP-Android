@@ -3,6 +3,7 @@ package com.mslx.console.data.remote
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import com.mslx.console.data.AppLogger
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -13,10 +14,11 @@ import javax.net.ssl.X509TrustManager
 object ApiClient {
 
     /** 客户端 User-Agent（发版时与 build.gradle.kts 的 versionName 保持同步）。 */
-    private const val USER_AGENT = "MSLX-Android/1.2.13"
+    private const val USER_AGENT = "MSLX-Android/1.2.14"
 
     fun build(baseUrl: String, apiKey: String): MslxApi {
         val builder = OkHttpClient.Builder()
+            .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .addHeader("x-api-key", apiKey)
@@ -52,6 +54,26 @@ object ApiClient {
             .hostnameVerifier { _, _ -> true }
     }
 
+    /**
+     * 脱敏 HTTP 日志拦截器：仅记录方法 + scheme://host/path（不含查询参数与请求头），
+     * 响应只记录状态码与耗时；异常记录 exception class/message。API Key 永不落日志。
+     */
+    private fun httpLoggingInterceptor(): okhttp3.Interceptor = okhttp3.Interceptor { chain ->
+        val request = chain.request()
+        val url = request.url
+        val safeUrl = "${url.scheme}://${url.host}${url.encodedPath}"
+        val started = System.currentTimeMillis()
+        try {
+            val response = chain.proceed(request)
+            val cost = System.currentTimeMillis() - started
+            AppLogger.d("HTTP", "${request.method} $safeUrl -> ${response.code} (${cost}ms)")
+            response
+        } catch (e: Exception) {
+            AppLogger.w("HTTP", "请求失败 ${request.method} $safeUrl", e)
+            throw e
+        }
+    }
+
     /** 信任所有证书的 X509TrustManager（仅守护进程内网自签场景使用）。 */
     private fun trustAllManager(): X509TrustManager = object : X509TrustManager {
         override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
@@ -68,6 +90,7 @@ object ApiClient {
     /** 构建 MSLX 官方在线 API 客户端(无需认证)。 */
     fun buildMslJavaApi(): MslJavaApi {
         val client = OkHttpClient.Builder()
+            .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .addHeader("User-Agent", USER_AGENT)
@@ -89,6 +112,7 @@ object ApiClient {
     /** 构建 MSLAPI v4 服务端核心接口客户端(无需认证)。 */
     fun buildMslServerCoreApi(): MslServerCoreApi {
         val client = OkHttpClient.Builder()
+            .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .addHeader("User-Agent", USER_AGENT)
@@ -110,6 +134,7 @@ object ApiClient {
     /** 构建 Microsoft OpenJDK GitHub API 客户端(无需认证)。 */
     fun buildMicrosoftJavaApi(): MicrosoftJavaApi {
         val client = OkHttpClient.Builder()
+            .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .addHeader("Accept", "application/vnd.github+json")
@@ -132,6 +157,7 @@ object ApiClient {
     /** 构建 GitHub Releases API 客户端(公开仓库，无需认证)。 */
     fun buildGitHubReleaseApi(): GitHubReleaseApi {
         val client = OkHttpClient.Builder()
+            .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .addHeader("Accept", "application/vnd.github+json")

@@ -143,6 +143,12 @@ data class ActionRequest(
     @SerializedName("action") val action: String,
 )
 
+/** POST /api/instance/delete 的请求体（与守护进程 DeleteServerRequest 对齐，字段小写）。 */
+data class DeleteServerRequest(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deleteFiles") val deleteFiles: Boolean = false,
+)
+
 /** SignalR CommandResult 事件负载：{ "success": bool, "message": "..." } */
 data class CommandResultPayload(
     @SerializedName("success") val success: Boolean = false,

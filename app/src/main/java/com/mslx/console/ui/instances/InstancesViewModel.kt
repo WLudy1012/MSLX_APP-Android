@@ -14,6 +14,7 @@ data class InstancesUiState(
     val loading: Boolean = true,
     val refreshing: Boolean = false,
     val deleting: Boolean = false,
+    val deleteError: String? = null,
     val error: String? = null,
     val instances: List<InstanceSummary> = emptyList(),
 )
@@ -34,11 +35,17 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun delete(instance: InstanceSummary, deleteFiles: Boolean, onDone: () -> Unit) {
         if (_state.value.deleting) return
-        _state.update { it.copy(deleting = true, error = null) }
+        _state.update { it.copy(deleting = true, deleteError = null) }
         viewModelScope.launch {
             repository.deleteInstance(instance.id, deleteFiles).fold(
-                onSuccess = { _state.update { it.copy(deleting = false) }; onDone(); refresh() },
-                onFailure = { e -> _state.update { it.copy(deleting = false, error = e.message ?: "删除失败") } },
+                onSuccess = {
+                    _state.update { it.copy(deleting = false, deleteError = null) }
+                    onDone()
+                    refresh()
+                },
+                onFailure = { e ->
+                    _state.update { it.copy(deleting = false, deleteError = e.message ?: "删除失败") }
+                },
             )
         }
     }

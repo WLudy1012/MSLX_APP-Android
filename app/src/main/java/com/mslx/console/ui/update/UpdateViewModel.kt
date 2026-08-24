@@ -74,6 +74,11 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                 .getOrDefault(UpdateChannel.STABLE)
             repository.checkLatest(currentVersion, channel).fold(
                 onSuccess = { update ->
+                    if (update != null) {
+                        com.mslx.console.data.AppLogger.i(
+                            "Update", "发现新版本 ${update.version} beta=${update.beta} force=${update.forceUpdate}"
+                        )
+                    }
                     _state.update {
                         it.copy(checking = false, update = update)
                     }

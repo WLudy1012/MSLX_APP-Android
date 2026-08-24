@@ -4,6 +4,7 @@ import com.mslx.console.data.model.ActionRequest
 import com.mslx.console.data.model.CancelCreationRequest
 import com.mslx.console.data.model.CommandResultPayload
 import com.mslx.console.data.model.CreateServerRequest
+import com.mslx.console.data.model.DeleteServerRequest
 import com.mslx.console.data.model.ServerCoreClassify
 import com.mslx.console.data.model.ServerCoreDownloadInfo
 import com.mslx.console.data.model.ServerCoreGameVersion
@@ -59,6 +60,7 @@ class InstanceRepository {
         this.baseUrl = normalized
         this.apiKey = apiKey.trim()
         this.api = ApiClient.build(normalized, this.apiKey)
+        AppLogger.i("Repository", "configure: ${normalized.trimEnd('/')} allowHttp=$allowHttp")
     }
 
     private fun requireApi(): MslxApi =
@@ -73,6 +75,7 @@ class InstanceRepository {
             if (resp.data == null) {
                 throw IllegalStateException("Daemon 鉴权失败：未返回有效状态")
             }
+            AppLogger.i("Repository", "verify 成功")
         } catch (e: HttpException) {
             if (e.code() == 401 || e.code() == 403) {
                 throw IllegalStateException("Daemon 鉴权失败，请检查 API Key", e)
@@ -144,8 +147,13 @@ class InstanceRepository {
     }
 
     suspend fun deleteInstance(id: Long, deleteFiles: Boolean): Result<String> = runCatching {
-        val resp = requireApi().deleteInstance(id, deleteFiles)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "删除实例失败")
+        AppLogger.i("Repository", "删除实例 id=$id deleteFiles=$deleteFiles")
+        val resp = requireApi().deleteInstance(DeleteServerRequest(id, deleteFiles))
+        if (resp.code != 200) {
+            // 400 等业务失败（如实例仍在运行）也走异常分支，message 直接透传给 UI
+            throw IllegalStateException(resp.message ?: "删除实例失败")
+        }
+        AppLogger.i("Repository", "删除实例成功 id=$id")
         resp.message ?: "实例已删除"
     }
 
