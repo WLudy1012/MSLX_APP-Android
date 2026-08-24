@@ -25,6 +25,7 @@ import com.mslx.console.ui.navigation.AppNavHost
 import com.mslx.console.ui.navigation.Routes
 import com.mslx.console.ui.theme.MSLXConsoleTheme
 import com.mslx.console.ui.theme.ThemeConfig
+import com.mslx.console.ui.update.CrashReportDialog
 import com.mslx.console.ui.update.DisclaimerDialog
 import com.mslx.console.ui.update.UpdateHost
 import kotlinx.coroutines.delay
@@ -44,8 +45,11 @@ class MainActivity : ComponentActivity() {
 
         val app = application as MSLXApplication
         setContent {
-            val settings by app.container.settingsStore.settingsFlow
-                .collectAsStateWithLifecycle(initialValue = AppSettings())
+            // 用 nullable 初始值区分"尚未加载"与"已加载"：免责协议必须等 DataStore
+            // 首次真实值落盘后再渲染，避免非初次打开时 disclaimerAccepted 一闪而过。
+            val settingsState by app.container.settingsStore.settingsFlow
+                .collectAsStateWithLifecycle(initialValue = null as AppSettings?)
+            val settings = settingsState ?: AppSettings()
             val scope = rememberCoroutineScope()
             val context = LocalContext.current
             val navController = rememberNavController()
@@ -82,13 +86,17 @@ class MainActivity : ComponentActivity() {
                 AppNavHost(settings = settings, navController = navController)
                 // 全局更新弹窗：启动自动检查 + 手动检查结果都走这里
                 UpdateHost()
-                // 首次开屏免责协议：5 秒后可确认，同意后持久化
-                DisclaimerDialog(
-                    settings = settings,
-                    onAccept = {
-                        scope.launch { app.container.settingsStore.acceptDisclaimer() }
-                    },
-                )
+                // 崩溃报告弹窗：上次会话发生未捕获异常时展示
+                CrashReportDialog()
+                // 首次开屏免责协议：5 秒后可确认，同意后持久化（仅真实加载后渲染）
+                if (settingsState != null) {
+                    DisclaimerDialog(
+                        settings = settingsState!!,
+                        onAccept = {
+                            scope.launch { app.container.settingsStore.acceptDisclaimer() }
+                        },
+                    )
+                }
             }
         }
     }

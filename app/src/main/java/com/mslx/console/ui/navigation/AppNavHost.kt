@@ -23,6 +23,9 @@ import com.mslx.console.ui.settings.FileManagerScreen
 import com.mslx.console.ui.settings.PluginsModsScreen
 import com.mslx.console.ui.settings.ServerPropertiesScreen
 import com.mslx.console.ui.settings.SettingsScreen
+import com.mslx.console.ui.settings.AppearanceScreen
+import com.mslx.console.ui.settings.AboutScreen
+import com.mslx.console.ui.settings.LogViewerScreen
 import com.mslx.console.ui.splash.SplashScreen
 import com.mslx.console.ui.user.UserCenterScreen
 import com.mslx.console.ui.welcome.WelcomeScreen
@@ -41,6 +44,9 @@ object Routes {
     const val PLUGINS_MODS = "pluginsMods/{instanceId}"
     const val SERVER_PROPS = "serverProps/{instanceId}"
     const val USER_CENTER = "userCenter"
+    const val APPEARANCE = "appearance"
+    const val ABOUT = "about"
+    const val LOGS = "logs"
 
     fun console(instanceId: Long): String = "console/$instanceId"
     fun connect(auto: Boolean, daemonId: String? = null): String =
@@ -189,7 +195,28 @@ fun AppNavHost(
                 onOpenUserCenter = {
                     navController.navigate(Routes.USER_CENTER) { launchSingleTop = true }
                 },
+                onOpenAppearance = {
+                    navController.navigate(Routes.APPEARANCE) { launchSingleTop = true }
+                },
+                onOpenLogs = {
+                    navController.navigate(Routes.LOGS) { launchSingleTop = true }
+                },
+                onOpenAbout = {
+                    navController.navigate(Routes.ABOUT) { launchSingleTop = true }
+                },
             )
+        }
+
+        composable(Routes.APPEARANCE) {
+            AppearanceScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Routes.ABOUT) {
+            AboutScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Routes.LOGS) {
+            LogViewerScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Routes.USER_CENTER) {

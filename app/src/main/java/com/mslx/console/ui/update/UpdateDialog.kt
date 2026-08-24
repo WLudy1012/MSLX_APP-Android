@@ -69,10 +69,10 @@ private fun UpdateDialog(
         },
         title = {
             Text(
-                text = if (update.forceUpdate) {
-                    "必须更新到 v${update.version}"
-                } else {
-                    "发现新版本 v${update.version}"
+                text = when {
+                    update.forceUpdate -> "必须更新到 v${update.version}"
+                    update.beta -> "发现测试版 v${update.version}"
+                    else -> "发现新版本 v${update.version}"
                 },
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,

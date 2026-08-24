@@ -7,12 +7,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppUpdateInfo
+import com.mslx.console.data.UpdateChannel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -27,6 +29,7 @@ data class UpdateUiState(
 class UpdateViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = getApplication<MSLXApplication>().container.updateRepository
+    private val store = getApplication<MSLXApplication>().container.settingsStore
 
     private val _state = MutableStateFlow(UpdateUiState())
     val state = _state.asStateFlow()
@@ -67,7 +70,9 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         if (_state.value.checking) return
         _state.update { it.copy(checking = true) }
         viewModelScope.launch {
-            repository.checkLatest(currentVersion).fold(
+            val channel: UpdateChannel = runCatching { store.settingsFlow.first().updateChannel }
+                .getOrDefault(UpdateChannel.STABLE)
+            repository.checkLatest(currentVersion, channel).fold(
                 onSuccess = { update ->
                     _state.update {
                         it.copy(checking = false, update = update)

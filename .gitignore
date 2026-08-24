@@ -15,4 +15,3 @@ keystore.properties
 *.keystore
 # 本地发布/Actions 配置说明（含密钥，切勿提交）
 ACTIONS_GUIDE.md
-# DISCLAIMER.txt 已移至工作区 develops/ 目录（不随仓库分发）

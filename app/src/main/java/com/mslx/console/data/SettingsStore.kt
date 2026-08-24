@@ -27,12 +27,16 @@ data class DaemonConfig(
 
 enum class ThemeMode { DYNAMIC, SEED }
 
-/** 应用全局设置(主题 + 多 Daemon + 引导状态)。 */
+/** 更新渠道：稳定版(默认) / 测试版(Beta)。 */
+enum class UpdateChannel { STABLE, BETA }
+
+/** 应用全局设置(主题 + 多 Daemon + 更新渠道 + 引导状态)。 */
 data class AppSettings(
     val daemons: List<DaemonConfig> = emptyList(),
     val activeDaemonId: String? = null,
     val themeMode: ThemeMode = ThemeMode.SEED,
     val seedColor: Long = 0xFF00838F,
+    val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val onboarded: Boolean = false,
     val disclaimerAccepted: Boolean = false,
 ) {
@@ -54,6 +58,7 @@ class SettingsStore(private val context: Context) {
         val SEED_COLOR = longPreferencesKey("seed_color")
         val ONBOARDED = booleanPreferencesKey("onboarded")
         val DISCLAIMER_ACCEPTED = booleanPreferencesKey("disclaimer_accepted")
+        val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
     }
 
     val settingsFlow: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
@@ -62,6 +67,7 @@ class SettingsStore(private val context: Context) {
             activeDaemonId = prefs[Keys.ACTIVE_DAEMON]?.takeIf { it.isNotBlank() },
             themeMode = if (prefs[Keys.THEME_MODE] == "dynamic") ThemeMode.DYNAMIC else ThemeMode.SEED,
             seedColor = prefs[Keys.SEED_COLOR] ?: 0xFF00838F,
+            updateChannel = if (prefs[Keys.UPDATE_CHANNEL] == "beta") UpdateChannel.BETA else UpdateChannel.STABLE,
             onboarded = prefs[Keys.ONBOARDED] ?: false,
             disclaimerAccepted = prefs[Keys.DISCLAIMER_ACCEPTED] ?: false,
         )
@@ -76,6 +82,7 @@ class SettingsStore(private val context: Context) {
             prefs[Keys.SEED_COLOR] = next.seedColor
             prefs[Keys.ONBOARDED] = next.onboarded
             prefs[Keys.DISCLAIMER_ACCEPTED] = next.disclaimerAccepted
+            prefs[Keys.UPDATE_CHANNEL] = if (next.updateChannel == UpdateChannel.BETA) "beta" else "stable"
         }
     }
 
@@ -100,6 +107,9 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setTheme(mode: ThemeMode, seedColor: Long) =
         update { it.copy(themeMode = mode, seedColor = seedColor) }
+
+    suspend fun setUpdateChannel(channel: UpdateChannel) =
+        update { it.copy(updateChannel = channel) }
 
     suspend fun markOnboarded() = update { it.copy(onboarded = true) }
 

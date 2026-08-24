@@ -278,6 +278,8 @@ private fun BasicStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanceUi
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(value = state.path, onValueChange = { v -> onUpdate { it.copy(path = v) } }, label = { Text("实例路径（选填，Daemon 上的绝对路径）") }, placeholder = { Text("例如: /home/user/下载/") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(6.dp))
+        Text("留空时默认创建在 Daemon 数据目录下的 Server 文件夹中", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(6.dp))
         Text("常用 Daemon 路径", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("/home/user/下载/", "/home/user/", "/opt/servers/").forEach { path ->
@@ -498,7 +500,7 @@ private fun ResourceStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanc
 private fun ConfirmStep(state: CreateInstanceUiState) {
     SectionCard("确认信息") {
         SummaryRow("实例名称", state.name)
-        SummaryRow("实例路径", state.path.ifBlank { "默认路径" })
+        SummaryRow("实例路径", state.path.ifBlank { "默认路径（Daemon 数据目录/Server）" })
         if (state.mode == 3) {
             SummaryRow("服务端核心", state.core.ifBlank { "基岩版核心" })
         } else {

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppSettings
 import com.mslx.console.data.ThemeMode
+import com.mslx.console.data.UpdateChannel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -25,6 +26,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun setTheme(mode: ThemeMode, seedColor: Long) {
         viewModelScope.launch { store.setTheme(mode, seedColor) }
+    }
+
+    fun setUpdateChannel(channel: UpdateChannel) {
+        viewModelScope.launch { store.setUpdateChannel(channel) }
     }
 
     fun setActiveDaemon(id: String) {

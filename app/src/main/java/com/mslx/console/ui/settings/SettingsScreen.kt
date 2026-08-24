@@ -3,14 +3,8 @@ package com.mslx.console.ui.settings
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.ComponentActivity
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,16 +13,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -52,21 +47,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.DaemonConfig
-import com.mslx.console.data.ThemeMode
+import com.mslx.console.data.UpdateChannel
 import com.mslx.console.ui.MainBottomNav
 import com.mslx.console.ui.TopPage
-import com.mslx.console.ui.theme.PresetColors
 import com.mslx.console.ui.update.UpdateViewModel
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onOpenHome: () -> Unit,
@@ -75,13 +67,13 @@ fun SettingsScreen(
     onAddDaemon: () -> Unit,
     onEditDaemon: (String) -> Unit,
     onOpenUserCenter: () -> Unit,
+    onOpenAppearance: () -> Unit,
+    onOpenLogs: () -> Unit,
+    onOpenAbout: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<DaemonConfig?>(null) }
-    var themeExpanded by remember { mutableStateOf(false) }
-    var daemonExpanded by remember { mutableStateOf(true) }
-    var aboutExpanded by remember { mutableStateOf(false) }
 
     // 手动检查更新：必须与 MainActivity 的 UpdateHost 共用同一个 activity 作用域 ViewModel
     val activity = LocalContext.current.findActivity()
@@ -117,9 +109,7 @@ fun SettingsScreen(
             )
         },
         topBar = {
-            TopAppBar(
-                title = { Text("设置") },
-            )
+            TopAppBar(title = { Text("设置") })
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
@@ -168,46 +158,68 @@ fun SettingsScreen(
             }
             Spacer(Modifier.size(20.dp))
 
-            // ---- 主题颜色 ----
-            SectionTitle("主题颜色", expanded = themeExpanded, onToggle = { themeExpanded = !themeExpanded })
-            if (themeExpanded) Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    ThemeOption(
-                        title = "动态取色 (Material You)",
-                        subtitle = "跟随系统壁纸自动生成配色（Android 12+）",
-                        selected = settings.themeMode == ThemeMode.DYNAMIC,
-                        onClick = { viewModel.setTheme(ThemeMode.DYNAMIC, settings.seedColor) },
+            // ---- 更新渠道 ----
+            SectionTitle("更新渠道")
+            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                    ChannelOption(
+                        title = "稳定版",
+                        subtitle = "仅接收正式稳定版更新（推荐）",
+                        selected = settings.updateChannel == UpdateChannel.STABLE,
+                        onClick = { viewModel.setUpdateChannel(UpdateChannel.STABLE) },
                     )
-                    Spacer(Modifier.size(8.dp))
-                    ThemeOption(
-                        title = "预设颜色",
-                        subtitle = "从下方挑选一个主题色",
-                        selected = settings.themeMode == ThemeMode.SEED,
-                        onClick = { viewModel.setTheme(ThemeMode.SEED, settings.seedColor) },
+                    ChannelOption(
+                        title = "测试版",
+                        subtitle = "同时接收 Beta 测试版更新",
+                        selected = settings.updateChannel == UpdateChannel.BETA,
+                        onClick = { viewModel.setUpdateChannel(UpdateChannel.BETA) },
                     )
-                    if (settings.themeMode == ThemeMode.SEED) {
-                        Spacer(Modifier.size(12.dp))
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            PresetColors.forEach { preset ->
-                                ColorDot(
-                                    color = Color(preset.argb),
-                                    selected = settings.seedColor == preset.argb,
-                                    onClick = { viewModel.setTheme(ThemeMode.SEED, preset.argb) },
-                                )
+                }
+            }
+
+            Spacer(Modifier.size(20.dp))
+
+            // ---- 通用 ----
+            SectionTitle("通用")
+            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                Column {
+                    EntryRow(
+                        icon = { Icon(Icons.Filled.Star, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "外观",
+                        subtitle = "主题颜色与动态取色",
+                        onClick = onOpenAppearance,
+                    )
+                    EntryRow(
+                        icon = { Icon(Icons.AutoMirrored.Filled.List, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "运行日志",
+                        subtitle = "查看与导出应用日志",
+                        onClick = onOpenLogs,
+                    )
+                    EntryRow(
+                        icon = { Icon(Icons.Filled.Refresh, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "检查更新",
+                        subtitle = if (versionName.isBlank()) "MSLX 控制台" else "MSLX 控制台 v$versionName",
+                        onClick = { if (!updateState.checking) updateViewModel.checkManually() },
+                        trailing = {
+                            if (updateState.checking) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                             }
-                        }
-                    }
+                        },
+                    )
+                    EntryRow(
+                        icon = { Icon(Icons.Filled.Info, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "关于",
+                        subtitle = "版本、更新说明与贡献者",
+                        onClick = onOpenAbout,
+                    )
                 }
             }
 
             Spacer(Modifier.size(20.dp))
 
             // ---- Daemon 管理 ----
-            SectionTitle("Daemon", expanded = daemonExpanded, onToggle = { daemonExpanded = !daemonExpanded })
-            if (daemonExpanded) Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            SectionTitle("Daemon 管理")
+            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
                     if (settings.daemons.isEmpty()) {
                         Text(
@@ -239,48 +251,6 @@ fun SettingsScreen(
                     }
                 }
             }
-
-            Spacer(Modifier.size(20.dp))
-
-            // ---- 关于与更新 ----
-            SectionTitle("关于", expanded = aboutExpanded, onToggle = { aboutExpanded = !aboutExpanded })
-            if (aboutExpanded) Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(enabled = !updateState.checking) {
-                            updateViewModel.checkManually()
-                        }
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Refresh,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "检查更新",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = if (versionName.isBlank()) {
-                                "MSLX 控制台"
-                            } else {
-                                "MSLX 控制台 v$versionName"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (updateState.checking) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    }
-                }
-            }
         }
     }
 
@@ -307,18 +277,18 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SectionTitle(text: String, expanded: Boolean, onToggle: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 4.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(text, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-        Text(if (expanded) "收起" else "展开", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-    }
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+    )
 }
 
 @Composable
-private fun ThemeOption(
+private fun ChannelOption(
     title: String,
     subtitle: String,
     selected: Boolean,
@@ -328,7 +298,7 @@ private fun ThemeOption(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = onClick)
@@ -345,30 +315,35 @@ private fun ThemeOption(
 }
 
 @Composable
-private fun ColorDot(color: Color, selected: Boolean, onClick: () -> Unit) {
-    Box(
+private fun EntryRow(
+    icon: @Composable () -> Unit,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    trailing: @Composable () -> Unit = {},
+) {
+    Row(
         modifier = Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(color)
-            .then(
-                if (selected) {
-                    Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
-                } else {
-                    Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                },
-            )
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (selected) {
-            Icon(
-                imageVector = Icons.Filled.Check,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(20.dp),
+        icon()
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        trailing()
     }
 }
 
