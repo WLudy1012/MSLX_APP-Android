@@ -3,7 +3,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Android CI](https://github.com/WLudy1012/MSLX_APP-Android/actions/workflows/android.yml/badge.svg)](https://github.com/WLudy1012/MSLX_APP-Android/actions/workflows/android.yml)
 
-MSLX 守护程序(MSLX Daemon)的手机安卓端控制台。基于 **Kotlin + Jetpack Compose** 构建，
+MSLX 守护程序(MSLX Daemon)的第三方手机安卓端控制台。基于 **Kotlin + Jetpack Compose** 构建，
 复刻了 MSLX Desktop 版"连接守护程序 → 管理实例"的核心能力,并针对手机触屏重新设计了操作流程。
 
 > 仓库地址:https://github.com/WLudy1012/MSLX_APP-Android。Android applicationId / 包名仍为 `com.mslx.console`,未随仓库改名而修改。
