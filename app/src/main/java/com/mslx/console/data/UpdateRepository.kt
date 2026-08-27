@@ -7,7 +7,7 @@ import com.mslx.console.data.remote.GitHubRelease
  * 应用更新信息（由 GitHub Release 解析而来）。
  */
 data class AppUpdateInfo(
-    /** 最新版本号（去掉 v 前缀与 Beta/Force 后缀），如 "1.2.13"。 */
+    /** 展示用版本标识：普通渠道为语义化版本；Actions 渠道为 "dev"。 */
     val version: String,
     /** Release 介绍（更新内容）。 */
     val notes: String,
@@ -17,13 +17,15 @@ data class AppUpdateInfo(
     val apkName: String,
     /** APK 大小（字节）。 */
     val apkSize: Long,
-    /** 是否为测试版（tag 带 -Beta 后缀）。 */
+    /** 是否为测试版（tag 带 -Beta 后缀，或 Actions 调试构建）。 */
     val beta: Boolean = false,
     /**
      * 是否强制更新：任一高于当前版本的 release tag 带 -Force 后缀，
      * 或其说明含"强制更新"标记（旧版兼容）时为 true。
      */
     val forceUpdate: Boolean = false,
+    /** 是否为 Actions 调试构建（来自 dev Release，不稳定，需应用内下载安装）。 */
+    val actions: Boolean = false,
 )
 
 /** 单个 release 的解析结果（内部使用）。 */
@@ -37,11 +39,11 @@ private data class ParsedRelease(
 
 /**
  * 检查应用更新：查询 GitHub 仓库 Release 列表，
- * 按更新渠道（稳定/测试）过滤，与当前版本比较，返回更新信息（无更新时返回 null）。
+ * 按更新渠道（稳定/测试/Actions）过滤，与当前版本比较，返回更新信息（无更新时返回 null）。
  */
 class UpdateRepository {
 
-    /** 检查是否有新版本。currentVersion 形如 "1.2.13"。 */
+    /** 检查是否有新版本。currentVersion 形如 "1.2.16"。 */
     suspend fun checkLatest(currentVersion: String, channel: UpdateChannel): Result<AppUpdateInfo?> = runCatching {
         val releases = ApiClient.buildGitHubReleaseApi().releases()
         parseUpdate(releases, currentVersion, channel)
@@ -53,6 +55,11 @@ class UpdateRepository {
         currentVersion: String,
         channel: UpdateChannel,
     ): AppUpdateInfo? {
+        // Actions 渠道：直接取 dev Release 的最新调试构建（不做版本比较，main 分支产物即"最新"）
+        if (channel == UpdateChannel.ACTIONS) {
+            return parseActionsRelease(releases)
+        }
+
         // 过滤出正式(非预发布)且带 APK 资产的版本，解析 tag 的 Beta/Force 后缀
         val parsed = releases
             .filter { !it.prerelease }
@@ -91,10 +98,28 @@ class UpdateRepository {
         )
     }
 
+    /** 解析 Actions 渠道：取 tag 为 dev 的 Release（由 android.yml 每次 main push 覆盖发布）。 */
+    private fun parseActionsRelease(releases: List<GitHubRelease>): AppUpdateInfo? {
+        val dev = releases.firstOrNull { it.tagName?.trim()?.equals("dev", ignoreCase = true) == true } ?: return null
+        val apk = dev.assets.firstOrNull { it.name?.endsWith(".apk", ignoreCase = true) == true } ?: return null
+        val url = apk.browserDownloadUrl ?: return null
+        return AppUpdateInfo(
+            version = "dev",
+            notes = dev.body.orEmpty(),
+            downloadUrl = url,
+            apkName = apk.name ?: "app-debug.apk",
+            apkSize = apk.size ?: 0,
+            beta = true,
+            actions = true,
+        )
+    }
+
     /** 解析 tag 为 (版本号, 是否测试版, 是否强制版)。支持 v 前缀与 -Beta/-Force 后缀。 */
     private fun parseTag(tagName: String?): ParsedTag? {
         val raw = tagName?.trim()?.removePrefix("v") ?: return null
         if (raw.isBlank()) return null
+        // 非数字开头的 tag（如 dev / nightly）不属于语义化版本，稳定/测试渠道一律跳过
+        if (raw.firstOrNull()?.isDigit() != true) return null
         val lower = raw.lowercase()
         val beta = lower.endsWith("-beta")
         val force = lower.endsWith("-force")

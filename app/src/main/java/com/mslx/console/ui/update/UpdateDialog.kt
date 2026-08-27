@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,7 +27,8 @@ import com.mslx.console.data.AppUpdateInfo
 /**
  * 全局更新弹窗宿主：挂载在导航根节点外层。
  * - 启动自动检查：发现新版本即弹窗；
- * - 设置页手动检查：结果也通过同一状态弹窗/提示。
+ * - 设置页手动检查：结果也通过同一状态弹窗/提示；
+ * - Actions 渠道：展示不稳定警告并在应用内下载安装调试 APK。
  */
 @Composable
 fun UpdateHost(
@@ -44,7 +46,10 @@ fun UpdateHost(
         UpdateDialog(
             currentVersion = state.currentVersion,
             update = update,
+            downloading = state.downloadingActions,
+            downloadProgress = state.downloadProgress,
             onUpdate = { viewModel.openUpdate() },
+            onInstallActions = { viewModel.downloadAndInstallActions() },
             onSkip = { viewModel.skip() },
         )
     }
@@ -54,12 +59,15 @@ fun UpdateHost(
 private fun UpdateDialog(
     currentVersion: String,
     update: AppUpdateInfo,
+    downloading: Boolean,
+    downloadProgress: Float,
     onUpdate: () -> Unit,
+    onInstallActions: () -> Unit,
     onSkip: () -> Unit,
 ) {
     AlertDialog(
         // 强制更新时不可通过点击外部/返回键关闭，必须更新后才能继续使用
-        onDismissRequest = { if (!update.forceUpdate) onSkip() },
+        onDismissRequest = { if (!update.forceUpdate && !downloading) onSkip() },
         icon = {
             Icon(
                 imageVector = Icons.Filled.Build,
@@ -70,6 +78,7 @@ private fun UpdateDialog(
         title = {
             Text(
                 text = when {
+                    update.actions -> "Actions 调试构建"
                     update.forceUpdate -> "必须更新到 v${update.version}"
                     update.beta -> "发现测试版 v${update.version}"
                     else -> "发现新版本 v${update.version}"
@@ -84,6 +93,14 @@ private fun UpdateDialog(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
             ) {
+                if (update.actions) {
+                    Text(
+                        text = "⚠ 该构建来自 GitHub Actions，为最新代码的调试版本，未经过正式测试，可能存在不稳定或功能异常，请谨慎安装。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
                 if (update.forceUpdate) {
                     Text(
                         text = "此版本必须更新，否则无法继续使用。",
@@ -93,10 +110,10 @@ private fun UpdateDialog(
                     Spacer(Modifier.height(6.dp))
                 }
                 Text(
-                    text = if (currentVersion.isBlank()) {
-                        "更新内容："
-                    } else {
-                        "当前版本 v$currentVersion → 新版本 v${update.version}"
+                    text = when {
+                        update.actions && currentVersion.isNotBlank() -> "当前版本 v$currentVersion → Actions 最新调试构建"
+                        currentVersion.isBlank() -> "更新内容："
+                        else -> "当前版本 v$currentVersion → 新版本 v${update.version}"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -114,15 +131,38 @@ private fun UpdateDialog(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                if (downloading) {
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { downloadProgress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "下载中 ${(downloadProgress.coerceIn(0f, 1f) * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = onUpdate) {
-                Text(if (update.forceUpdate) "立即更新" else "更新", color = MaterialTheme.colorScheme.primary)
+            TextButton(
+                onClick = if (update.actions) onInstallActions else onUpdate,
+                enabled = !downloading,
+            ) {
+                Text(
+                    text = when {
+                        update.actions && downloading -> "下载中…"
+                        update.actions -> "下载并安装"
+                        update.forceUpdate -> "立即更新"
+                        else -> "更新"
+                    },
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
         },
         dismissButton = {
-            if (!update.forceUpdate) {
+            if (!update.forceUpdate && !downloading) {
                 TextButton(onClick = onSkip) { Text("跳过") }
             }
         },

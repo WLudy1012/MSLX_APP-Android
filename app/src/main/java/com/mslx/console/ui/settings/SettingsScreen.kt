@@ -74,6 +74,7 @@ fun SettingsScreen(
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<DaemonConfig?>(null) }
+    var pendingActionsConfirm by remember { mutableStateOf(false) }
 
     // 手动检查更新：必须与 MainActivity 的 UpdateHost 共用同一个 activity 作用域 ViewModel
     val activity = LocalContext.current.findActivity()
@@ -174,6 +175,12 @@ fun SettingsScreen(
                         selected = settings.updateChannel == UpdateChannel.BETA,
                         onClick = { viewModel.setUpdateChannel(UpdateChannel.BETA) },
                     )
+                    ChannelOption(
+                        title = "Actions 调试构建",
+                        subtitle = "直接安装 GitHub Actions 最新调试版（不稳定）",
+                        selected = settings.updateChannel == UpdateChannel.ACTIONS,
+                        onClick = { pendingActionsConfirm = true },
+                    )
                 }
             }
 
@@ -271,6 +278,31 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            },
+        )
+    }
+
+    // Actions 渠道不稳定警告
+    if (pendingActionsConfirm) {
+        AlertDialog(
+            onDismissRequest = { pendingActionsConfirm = false },
+            title = { Text("选择 Actions 调试构建渠道") },
+            text = {
+                Text(
+                    "该渠道直接安装 GitHub Actions 最新调试版本，代码未经正式测试，可能不稳定、存在 Bug 或导致数据异常。确定要切换到该渠道吗？",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.setUpdateChannel(UpdateChannel.ACTIONS)
+                        pendingActionsConfirm = false
+                    },
+                ) { Text("仍然使用", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingActionsConfirm = false }) { Text("取消") }
             },
         )
     }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 暴露路径：仅 filesDir/apks/ 下的 APK（Actions 渠道下载产物）可被系统安装器读取。 -->
+<paths>
+    <files-path
+        name="apks"
+        path="apks/" />
+</paths>

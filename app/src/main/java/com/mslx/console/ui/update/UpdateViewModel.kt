@@ -1,13 +1,16 @@
 package com.mslx.console.ui.update
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
+import com.mslx.console.data.AppLogger
 import com.mslx.console.data.AppUpdateInfo
 import com.mslx.console.data.UpdateChannel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -17,13 +20,20 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.concurrent.TimeUnit
 
 data class UpdateUiState(
     val checking: Boolean = false,
     /** 检测到的新版本（非空时 UI 弹窗展示）。 */
     val update: AppUpdateInfo? = null,
-    /** 当前应用版本号，如 "1.2.7"。 */
+    /** 当前应用版本号，如 "1.2.16"。 */
     val currentVersion: String = "",
+    /** Actions 渠道：是否正在下载调试 APK。 */
+    val downloadingActions: Boolean = false,
+    /** Actions 渠道：下载进度 0..1。 */
+    val downloadProgress: Float = 0f,
 )
 
 class UpdateViewModel(application: Application) : AndroidViewModel(application) {
@@ -48,7 +58,7 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         _state.update { it.copy(currentVersion = currentVersion) }
     }
 
-    /** 当前应用版本号，如 "1.2.6"。 */
+    /** 当前应用版本号，如 "1.2.16"。 */
     private val currentVersion: String
         get() = runCatching {
             getApplication<Application>().packageManager
@@ -75,8 +85,8 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
             repository.checkLatest(currentVersion, channel).fold(
                 onSuccess = { update ->
                     if (update != null) {
-                        com.mslx.console.data.AppLogger.i(
-                            "Update", "发现新版本 ${update.version} beta=${update.beta} force=${update.forceUpdate}"
+                        AppLogger.i(
+                            "Update", "发现新版本 ${update.version} beta=${update.beta} force=${update.forceUpdate} actions=${update.actions}"
                         )
                     }
                     _state.update {
@@ -85,7 +95,13 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                     retryJob?.cancel()
                     retryJob = null
                     if (manual && update == null) {
-                        _message.tryEmit("当前已是最新版本")
+                        _message.tryEmit(
+                            if (channel == UpdateChannel.ACTIONS) {
+                                "未找到 Actions 构建，请确认 CI 已成功运行并发布了 dev 版本"
+                            } else {
+                                "当前已是最新版本"
+                            },
+                        )
                     }
                 },
                 onFailure = { e ->
@@ -118,23 +134,104 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 用户选择"跳过"（关闭弹窗，本次启动不再提示；同时停止补偿重试）。 */
+    /** 用户选择"跳过"（关闭弹窗，本次启动不再提示；同时停止补偿重试与 Actions 下载）。 */
     fun skip() {
         retryJob?.cancel()
         retryJob = null
-        _state.update { it.copy(update = null) }
+        _state.update { it.copy(update = null, downloadingActions = false, downloadProgress = 0f) }
     }
 
     /** 用户选择"更新"：跳转浏览器下载 APK。仅放行 https 且 host 为 GitHub 下载域，防任意 scheme 拉起。 */
     fun openUpdate() {
         val url = _state.value.update?.downloadUrl ?: return
         val uri = Uri.parse(url)
-        val allowedHosts = setOf("github.com", "www.github.com", "objects.githubusercontent.com")
+        val allowedHosts = setOf("github.com", "www.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
         val host = uri.host?.lowercase() ?: return
         if (uri.scheme != "https" || host !in allowedHosts) return
         val intent = Intent(Intent.ACTION_VIEW, uri).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         runCatching { getApplication<Application>().startActivity(intent) }
+    }
+
+    /** Actions 渠道：应用内下载 dev 调试 APK 并拉起系统安装器。 */
+    fun downloadAndInstallActions() {
+        val update = _state.value.update ?: return
+        if (!update.actions || _state.value.downloadingActions) return
+        val uri = Uri.parse(update.downloadUrl)
+        val allowedHosts = setOf("github.com", "www.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
+        val host = uri.host?.lowercase() ?: return
+        if (uri.scheme != "https" || host !in allowedHosts) {
+            _message.tryEmit("下载地址不合法，已取消")
+            return
+        }
+        _state.update { it.copy(downloadingActions = true, downloadProgress = 0f) }
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    downloadToFile(context, update.downloadUrl)
+                }
+            }
+            result.onSuccess { file ->
+                AppLogger.i("Update", "Actions 构建下载完成 ${file.length()} bytes")
+                _state.update { it.copy(downloadingActions = false, update = null, downloadProgress = 0f) }
+                installApk(context, file)
+            }.onFailure { e ->
+                AppLogger.w("Update", "Actions 构建下载失败", e)
+                _state.update { it.copy(downloadingActions = false, downloadProgress = 0f) }
+                _message.tryEmit("Actions 构建下载失败：${e.message ?: "未知错误"}")
+            }
+        }
+    }
+
+    /** 下载 APK 到 filesDir/apks/app-debug.apk（带进度回调）。 */
+    private suspend fun downloadToFile(context: Context, url: String): File {
+        val request = okhttp3.Request.Builder().url(url).build()
+        val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
+            val body = response.body ?: throw IllegalStateException("响应为空")
+            val total = body.contentLength()
+            val dir = File(context.filesDir, "apks").apply { mkdirs() }
+            val target = File(dir, "app-debug.apk")
+            body.byteStream().use { input ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var downloaded = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        if (total > 0) {
+                            _state.update { it.copy(downloadProgress = downloaded.toFloat() / total) }
+                        }
+                    }
+                }
+            }
+            return target
+        }
+    }
+
+    /** 通过 FileProvider 拉起系统安装器。 */
+    private fun installApk(context: Context, file: File) {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file,
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(intent) }
+            .onFailure { e ->
+                AppLogger.w("Update", "打开安装器失败", e)
+                _message.tryEmit("无法打开安装器：${e.message ?: "未知错误"}")
+            }
     }
 }

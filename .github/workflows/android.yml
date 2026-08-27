@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 生成 dev 构建说明时需要短 SHA 与提交信息
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -29,6 +32,30 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # 仅 main push 时恢复正式签名密钥：debug 构建用 release 签名，
+      # 产出的 Actions 调试 APK 可直接覆盖安装正式版（PR 无 Secrets，走默认 debug 签名）。
+      - name: Restore signing keystore (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -e
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::Secret KEYSTORE_BASE64 为空，本次 debug 将使用默认 debug 签名（不可覆盖安装正式版）。"
+            exit 0
+          fi
+          mkdir -p keystore
+          echo "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > keystore/release.jks
+          cat > keystore.properties <<EOF
+          storeFile=keystore/release.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
       # 无 keystore 时 release 会产出未签名包，仅用于验证可编译性
       - name: Build debug & release APK
         run: |
@@ -40,3 +67,36 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      # Actions 更新渠道的数据源：把 main 分支最新 debug APK 发布到 dev Release（覆盖更新）。
+      # 注：GitHub Actions 工件 zip 下载需要认证，应用无法直接拉取，故用公开 Release 承载。
+      - name: Publish debug APK to dev release (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_SHA_SHORT: ${{ github.sha }}
+        run: |
+          SHA=$(sha256sum app/build/outputs/apk/debug/app-debug.apk | awk '{print $1}')
+          {
+            echo "# MSLX_APP-Android Actions 调试构建（不稳定）"
+            echo ""
+            echo "- 提交：\`${GH_SHA_SHORT:0:7}\`"
+            echo "- 分支：main"
+            echo "- 构建时间：$(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo "- 签名：正式签名（可覆盖安装正式版，但需先卸载同版本号或版本号更高时可直接覆盖）"
+            echo ""
+            echo "## 校验"
+            echo ""
+            echo "APK 文件：\`app-debug.apk\`"
+            echo "SHA-256：\`$SHA\`"
+          } > dev_release_notes.md
+
+      - name: Upload debug APK to dev release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          name: "dev (Actions 调试构建)"
+          body_path: dev_release_notes.md
+          files: app/build/outputs/apk/debug/app-debug.apk
+          update_existing: true
+          fail_on_unmatched_files: true

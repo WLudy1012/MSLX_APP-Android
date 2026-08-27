@@ -20,7 +20,7 @@ MSLX 守护程序（MSLX Daemon）的第三方手机安卓端控制台。基于 
 - **实例设置**：通用设置、文件管理（浏览/编辑/上传）、插件与模组管理、server.properties 编辑、Java 环境选择。
 - **用户中心**：查看/编辑当前用户信息、一键复制 API Key；管理员可进行用户管理（创建/编辑/删除）。
 - **主页仪表盘**：Daemon CPU / 内存负载监视（SignalR 实时推送）、系统信息、实例概览、开服/关服通知。
-- **软件自动更新**：启动检测 + 设置页手动检查；支持**稳定版 / 测试版（Beta）双更新渠道**；强制更新版本不可跳过。
+- **软件自动更新**：启动检测 + 设置页手动检查；支持**稳定版 / 测试版（Beta）双更新渠道**与 **Actions 调试构建渠道**（应用内下载安装 CI 最新 debug APK）；强制更新版本不可跳过。
 - **全应用运行日志**：设置页可查看 / 复制 / 导出 / 清空日志（1MB 轮转 + 敏感信息脱敏）；崩溃重启后自动弹窗提示提交 GitHub Issue。
 - **外观与关于**：主题颜色（动态取色 / 预设色）、「关于」页展示版本号、最近 Release 更新说明与贡献者。
 
@@ -102,7 +102,10 @@ app/src/main/java/com/mslx/console/
 - **稳定版**：tag 无后缀（如 `v1.2.15`）。
 - **测试版**：tag 带 `-Beta` 后缀（如 `v1.2.14-Beta`）。
 - **强制更新版**：tag 带 `-Force` 后缀，客户端检测到后弹窗禁跳过。
-- 设置页「更新渠道」可选 **稳定版**（默认）或 **测试版**：稳定渠道只接收正式版，测试渠道同时接收稳定版 + Beta 版。
+- 设置页「更新渠道」可选 **稳定版**（默认）/ **测试版** / **Actions 调试构建**：
+  - 稳定渠道只接收正式版；测试渠道同时接收稳定版 + Beta 版。
+  - **Actions 调试构建**：直接从 GitHub Actions 拉取最新 main 分支调试 APK（应用内下载并安装）。
+    该渠道**不稳定**，切换时会弹出警告；CI 产出的 debug APK 使用正式签名，可直接覆盖安装正式版。
 
 ## 📜 开源协议
 
@@ -119,7 +122,8 @@ Copyright (C) 2026 WLudy1012
 
 ## 🤖 持续集成（GitHub Actions）
 
-- **android.yml**：`main` 分支 push / PR 时自动构建 debug 与 release（未签名）APK，并上传 debug APK 工件。
+- **android.yml**：`main` 分支 push / PR 时自动构建 debug 与 release（未签名）APK，并上传 debug APK 工件；
+  main push 时还会用正式签名构建 debug APK（可直接覆盖安装正式版），并发布到 `dev` Release 供「Actions 调试构建」渠道拉取。
 - **release.yml**：推送 `v*` 标签时，使用仓库 Secrets 恢复签名密钥，构建签名 release APK 并自动附加到对应 Release。
 
 ### release.yml 所需 Secrets

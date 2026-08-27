@@ -37,6 +37,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Actions 渠道：CI 恢复正式签名密钥后，debug APK 也用 release 签名，
+            // 使 Actions 调试构建可直接覆盖安装正式版（同签名升级，无需先卸载）。
+            // 本地无 keystore.properties 时仍走默认 debug 签名。
+            if (keystoreProperties.containsKey("storeFile")) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

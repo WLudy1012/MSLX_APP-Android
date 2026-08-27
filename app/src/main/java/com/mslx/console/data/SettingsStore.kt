@@ -27,8 +27,8 @@ data class DaemonConfig(
 
 enum class ThemeMode { DYNAMIC, SEED }
 
-/** 更新渠道：稳定版(默认) / 测试版(Beta)。 */
-enum class UpdateChannel { STABLE, BETA }
+/** 更新渠道：稳定版(默认) / 测试版(Beta) / Actions 调试构建。 */
+enum class UpdateChannel { STABLE, BETA, ACTIONS }
 
 /** 应用全局设置(主题 + 多 Daemon + 更新渠道 + 引导状态)。 */
 data class AppSettings(
@@ -67,7 +67,11 @@ class SettingsStore(private val context: Context) {
             activeDaemonId = prefs[Keys.ACTIVE_DAEMON]?.takeIf { it.isNotBlank() },
             themeMode = if (prefs[Keys.THEME_MODE] == "dynamic") ThemeMode.DYNAMIC else ThemeMode.SEED,
             seedColor = prefs[Keys.SEED_COLOR] ?: 0xFF00838F,
-            updateChannel = if (prefs[Keys.UPDATE_CHANNEL] == "beta") UpdateChannel.BETA else UpdateChannel.STABLE,
+            updateChannel = when (prefs[Keys.UPDATE_CHANNEL]) {
+                "beta" -> UpdateChannel.BETA
+                "actions" -> UpdateChannel.ACTIONS
+                else -> UpdateChannel.STABLE
+            },
             onboarded = prefs[Keys.ONBOARDED] ?: false,
             disclaimerAccepted = prefs[Keys.DISCLAIMER_ACCEPTED] ?: false,
         )
@@ -82,7 +86,11 @@ class SettingsStore(private val context: Context) {
             prefs[Keys.SEED_COLOR] = next.seedColor
             prefs[Keys.ONBOARDED] = next.onboarded
             prefs[Keys.DISCLAIMER_ACCEPTED] = next.disclaimerAccepted
-            prefs[Keys.UPDATE_CHANNEL] = if (next.updateChannel == UpdateChannel.BETA) "beta" else "stable"
+            prefs[Keys.UPDATE_CHANNEL] = when (next.updateChannel) {
+                UpdateChannel.BETA -> "beta"
+                UpdateChannel.ACTIONS -> "actions"
+                UpdateChannel.STABLE -> "stable"
+            }
         }
     }
 
