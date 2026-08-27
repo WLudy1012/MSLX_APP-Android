@@ -87,10 +87,19 @@ class ConsoleViewModel(
                     status = info.status,
                     statusText = info.statusText,
                     onlinePlayers = info.onlinePlayers,
-                    uptime = info.uptime,
+                    uptime = info.uptime?.let(::formatUptime),
                 )
             }
         }
+    }
+
+    /**
+     * 把守护进程返回的 TimeSpan 字符串（如 `00:12:34.5678901` / `1.02:03:04.5`）
+     * 截断到秒（保留天）：`00:12:34` / `1.02:03:04`。无小数部分时原样返回。
+     */
+    private fun formatUptime(raw: String): String {
+        val t = raw.trim()
+        return if (t.contains('.')) t.substringBefore('.') else t
     }
 
     private suspend fun connectHub() {
