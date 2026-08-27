@@ -11,6 +11,7 @@ import com.mslx.console.data.model.SystemInfo
 import com.mslx.console.data.remote.ApiClient
 import com.mslx.console.data.remote.SystemMonitorClient
 import com.mslx.console.ui.ServerNotificationHelper
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,10 +70,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 周期性刷新实例状态（负载走 SignalR 实时推送）
         viewModelScope.launch {
             while (isActive) {
-                delay(15_000)
-                if (_state.value.connected) {
-                    refreshInstances()
+                try {
+                    if (_state.value.connected) {
+                        refreshInstances()
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // 轮询体异常不能杀死循环：记录后继续下一轮
+                    AppLogger.w("Home", "轮询实例状态异常", e)
                 }
+                delay(15_000)
             }
         }
     }
@@ -97,8 +105,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 自动连接已保存的激活 Daemon；没有配置则直接进入未连接状态。 */
     fun autoConnect() {
         viewModelScope.launch {
-            val settings = store.settingsFlow.first()
-            val daemon = settings.activeDaemon
+            val settings = runCatching { store.settingsFlow.first() }
+                .onFailure { AppLogger.w("Home", "读取设置失败", it) }
+                .getOrNull()
+            val daemon = settings?.activeDaemon
             if (daemon == null) {
                 _state.update { it.copy(connecting = false, connected = false) }
                 return@launch
@@ -121,7 +131,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             if (connected) {
                 // 若地址被规范化（如 http 升级 https），同步回写存储，避免下次仍用旧地址
                 if (normalizedUrl != daemon.baseUrl) {
-                    store.upsertDaemon(daemon.copy(baseUrl = normalizedUrl))
+                    runCatching { store.upsertDaemon(daemon.copy(baseUrl = normalizedUrl)) }
+                        .onFailure { AppLogger.w("Home", "回写 Daemon 地址失败", it) }
                 }
                 _state.update { it.copy(connecting = false, connected = true, error = null) }
                 AppLogger.i("Home", "连接成功 $normalizedUrl")

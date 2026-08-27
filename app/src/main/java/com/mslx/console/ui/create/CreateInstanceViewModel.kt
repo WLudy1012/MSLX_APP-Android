@@ -378,7 +378,12 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     fun removeUploadedCore() {
         val key = _state.value.coreFileKey
         if (key.isNotBlank()) {
-            viewModelScope.launch { repository.deleteUpload(key) }
+            viewModelScope.launch {
+                // 清理失败仅记录日志（临时文件由 Daemon 侧过期回收兜底）
+                repository.deleteUpload(key).onFailure { e ->
+                    com.mslx.console.data.AppLogger.w("Create", "清理上传临时文件失败", e)
+                }
+            }
         }
         _state.update { it.copy(coreFileKey = "", core = "", uploadProgress = 0, uploadedFileName = "") }
     }
@@ -539,11 +544,14 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                     // 否则 vanilla 等核心首次启动仍会因 eula.txt 未同意而退出
                     if (_state.value.ignoreEula) {
                         viewModelScope.launch {
+                            // 自动同意 EULA 写入失败仅记录日志（启动流程还有 ensureEulaAgreed 兜底）
                             repository.saveFileContent(
                                 id = serverId.toLongOrNull() ?: return@launch,
                                 path = "eula.txt",
                                 content = EULA_AGREED_CONTENT,
-                            )
+                            ).onFailure { e ->
+                                com.mslx.console.data.AppLogger.w("Create", "写入 eula.txt 失败", e)
+                            }
                         }
                     }
                 }

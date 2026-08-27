@@ -49,9 +49,11 @@ class ConnectViewModel(
     init {
         if (autoConnect || editingDaemonId != null) {
             viewModelScope.launch {
-                val settings = store.settingsFlow.first()
-                val target = settings.daemons.firstOrNull { it.id == editingDaemonId }
-                    ?: settings.activeDaemon
+                val settings = runCatching { store.settingsFlow.first() }
+                    .onFailure { com.mslx.console.data.AppLogger.w("Connect", "读取设置失败", it) }
+                    .getOrNull()
+                val target = settings?.daemons?.firstOrNull { it.id == editingDaemonId }
+                    ?: settings?.activeDaemon
                 if (target != null) {
                     _state.update {
                         it.copy(
@@ -103,14 +105,17 @@ class ConnectViewModel(
         if (_state.value.loading) return
         _state.update { it.copy(loading = true, autoChecking = auto, error = null) }
         viewModelScope.launch {
-            val duplicate = store.settingsFlow.first().daemons.any {
+            val settings = runCatching { store.settingsFlow.first() }
+                .onFailure { com.mslx.console.data.AppLogger.w("Connect", "读取设置失败", it) }
+                .getOrNull()
+            val duplicate = settings?.daemons?.any {
                 it.id != config.id &&
                     ApiClient.normalizeDaemonUrl(it.baseUrl, it.allowHttp).equals(
                         ApiClient.normalizeDaemonUrl(config.baseUrl, config.allowHttp),
                         ignoreCase = true,
                     ) &&
                     it.apiKey == config.apiKey
-            }
+            } == true
             if (duplicate) {
                 _state.update { it.copy(loading = false, autoChecking = false, error = "同一 API Key 已连接此 Daemon，不能重复添加。") }
                 return@launch
@@ -121,7 +126,9 @@ class ConnectViewModel(
                 repository.verify()
             }
             if (result.isSuccess) {
-                store.upsertDaemon(config)
+                // 持久化失败不应阻断本次连接（内存中已生效），仅记录日志
+                runCatching { store.upsertDaemon(config) }
+                    .onFailure { com.mslx.console.data.AppLogger.w("Connect", "保存 Daemon 配置失败", it) }
                 _state.update { it.copy(loading = false, autoChecking = false) }
                 _connected.tryEmit(Unit)
             } else {

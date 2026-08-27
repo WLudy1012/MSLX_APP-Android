@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppLogger
 import com.mslx.console.data.remote.ApiClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,7 +49,14 @@ class ConnectivityViewModel(application: Application) : AndroidViewModel(applica
     init {
         viewModelScope.launch {
             while (isActive) {
-                checkOnce()
+                try {
+                    checkOnce()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // 单次检查失败绝不能让心跳循环终止
+                    AppLogger.w("Connectivity", "连通性检查异常", e)
+                }
                 delay(5_000)
             }
         }
@@ -56,8 +64,10 @@ class ConnectivityViewModel(application: Application) : AndroidViewModel(applica
 
     /** 立即执行一次连通性检查（也用于启动后的首查）。 */
     suspend fun checkOnce() {
-        val settings = store.settingsFlow.first()
-        val daemon = settings.activeDaemon
+        val settings = runCatching { store.settingsFlow.first() }
+            .onFailure { AppLogger.w("Connectivity", "读取设置失败", it) }
+            .getOrNull()
+        val daemon = settings?.activeDaemon
         if (daemon == null) {
             _state.value = ConnectivityUiState(online = null)
             wasOnline = null

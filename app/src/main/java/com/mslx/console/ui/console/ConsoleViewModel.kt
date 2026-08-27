@@ -4,7 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
+import com.mslx.console.data.AppLogger
 import com.mslx.console.data.remote.ConsoleHubClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -64,8 +66,15 @@ class ConsoleViewModel(
         // 周期性刷新状态(运行时长、在线人数、启停状态)
         viewModelScope.launch {
             while (true) {
+                try {
+                    loadInfo()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // 网络超时/解析异常等绝不能让轮询协程死亡：记录后继续下一轮
+                    AppLogger.w("Console", "轮询实例信息异常", e)
+                }
                 delay(15_000)
-                loadInfo()
             }
         }
     }
@@ -173,7 +182,9 @@ class ConsoleViewModel(
 
     fun agreeEulaAndStart() {
         viewModelScope.launch {
+            // 先尝试让守护进程记录 EULA 同意（失败不阻断，随后 start 本身会给出结果）
             repository.sendAction(instanceId, "agreeEula?true")
+                .onFailure { AppLogger.w("Console", "同意 EULA 失败", it) }
             val startResult = repository.sendAction(instanceId, "start")
             if (startResult.isSuccess) {
                 _events.tryEmit(ConsoleEvent.Toast(startResult.getOrNull() ?: "启动成功"))
