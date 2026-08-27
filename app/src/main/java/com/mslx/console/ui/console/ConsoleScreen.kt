@@ -58,7 +58,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -285,10 +288,21 @@ fun ConsoleScreen(
                         ) {
                             items(logs.size) { index ->
                                 val line = logs[index]
+                                // ANSI 原彩：按转义序列拆段着色，未着色段继承默认前景色
+                                val segments = remember(line.text) { parseAnsiLog(line.text) }
+                                val baseColor = if (line.system) ConsoleSystem else ConsoleText
                                 Text(
-                                    text = line.text,
+                                    text = buildAnnotatedString {
+                                        segments.forEach { seg ->
+                                            withStyle(
+                                                SpanStyle(
+                                                    color = seg.color ?: baseColor,
+                                                    fontWeight = seg.ansiFontWeight,
+                                                ),
+                                            ) { append(seg.text) }
+                                        }
+                                    },
                                     style = ConsoleTextStyle,
-                                    color = if (line.system) ConsoleSystem else ConsoleText,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             }

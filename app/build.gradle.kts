@@ -21,8 +21,8 @@ android {
         applicationId = "com.mslx.console"
         minSdk = 24
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.2.14"
+        versionCode = 18
+        versionName = "1.2.15"
     }
 
     signingConfigs {
