@@ -26,9 +26,6 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
     private val _state = MutableStateFlow(InstancesUiState())
     val state = _state.asStateFlow()
 
-    /** 当前连接的 Daemon 地址（用于界面展示）。 */
-    val baseUrl: String get() = repository.baseUrl
-
     init {
         refresh(initial = true)
     }

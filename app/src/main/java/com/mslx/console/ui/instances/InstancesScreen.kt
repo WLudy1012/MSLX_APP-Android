@@ -92,20 +92,7 @@ fun InstancesScreen(
         },
         topBar = {
             TopAppBar(
-                title = {
-                    Column {
-                        Text("实例列表", fontWeight = FontWeight.Bold)
-                        if (viewModel.baseUrl.isNotBlank()) {
-                            Text(
-                                text = viewModel.baseUrl,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                },
+                title = { Text("实例列表", fontWeight = FontWeight.Bold) },
                 actions = {},
             )
         },

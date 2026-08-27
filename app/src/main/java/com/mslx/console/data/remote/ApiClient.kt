@@ -14,7 +14,7 @@ import javax.net.ssl.X509TrustManager
 object ApiClient {
 
     /** 客户端 User-Agent（发版时与 build.gradle.kts 的 versionName 保持同步）。 */
-    private const val USER_AGENT = "MSLX-Android/1.2.15"
+    private const val USER_AGENT = "MSLX-Android/1.2.16"
 
     fun build(baseUrl: String, apiKey: String): MslxApi {
         val builder = OkHttpClient.Builder()
@@ -175,6 +175,29 @@ object ApiClient {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(GitHubReleaseApi::class.java)
+    }
+
+    /** 构建一言（Hitokoto）金句 API 客户端（公开接口，无需认证）。 */
+    fun buildHitokotoApi(): HitokotoApi {
+        val client = OkHttpClient.Builder()
+            .addInterceptor(httpLoggingInterceptor())
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Accept", "application/json")
+                    .addHeader("User-Agent", USER_AGENT)
+                    .build()
+                chain.proceed(request)
+            }
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .build()
+
+        return Retrofit.Builder()
+            .baseUrl("https://v1.hitokoto.cn/")
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(HitokotoApi::class.java)
     }
 
     /**

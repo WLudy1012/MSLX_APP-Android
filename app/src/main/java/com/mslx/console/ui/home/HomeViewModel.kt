@@ -43,6 +43,10 @@ data class HomeUiState(
     val error: String? = null,
     // 通知
     val notifications: List<ServerNotification> = emptyList(),
+    // 一言金句
+    val quote: String = "",
+    val quoteSource: String = "",
+    val quoteFailed: Boolean = false,
 )
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -61,6 +65,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         autoConnect()
+        loadQuote()
         // 周期性刷新实例状态（负载走 SignalR 实时推送）
         viewModelScope.launch {
             while (isActive) {
@@ -68,6 +73,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 if (_state.value.connected) {
                     refreshInstances()
                 }
+            }
+        }
+    }
+
+    /** 加载一言（Hitokoto）金句；失败时置 quoteFailed=true 由 UI 展示兜底文案，绝不崩溃。 */
+    fun loadQuote() {
+        viewModelScope.launch {
+            runCatching {
+                val q = ApiClient.buildHitokotoApi().quote()
+                val text = q.hitokoto?.trim().orEmpty()
+                if (text.isBlank()) throw IllegalStateException("一言返回为空")
+                text to (q.fromWho?.takeIf { it.isNotBlank() } ?: q.from.orEmpty())
+            }.onSuccess { (text, source) ->
+                _state.update { it.copy(quote = text, quoteSource = source, quoteFailed = false) }
+            }.onFailure { e ->
+                AppLogger.w("Home", "一言加载失败", e)
+                _state.update { it.copy(quote = "", quoteSource = "", quoteFailed = true) }
             }
         }
     }

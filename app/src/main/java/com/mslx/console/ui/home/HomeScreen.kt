@@ -1,5 +1,8 @@
 package com.mslx.console.ui.home
 
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,8 +21,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -40,12 +43,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mslx.console.ui.ConnectivityViewModel
 import com.mslx.console.ui.MainBottomNav
 import com.mslx.console.ui.TopPage
 import com.mslx.console.ui.statusColor
@@ -63,6 +68,15 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    // 连接连通性（activity 作用域全局单例，与 MainActivity 的 ConnectivityHost 共用）
+    val activity = LocalContext.current.findActivity()
+    val connectivityViewModel: ConnectivityViewModel = if (activity != null) {
+        viewModel(viewModelStoreOwner = activity)
+    } else {
+        viewModel()
+    }
+    val connectivityState by connectivityViewModel.state.collectAsStateWithLifecycle()
 
     // 每次回到主页时刷新负载与实例状态
     LifecycleResumeEffect(Unit) {
@@ -119,7 +133,8 @@ fun HomeScreen(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                item { DaemonStatusCard(state, onRefresh = viewModel::refreshMetrics) }
+                item { DaemonStatusCard(state, online = connectivityState.online, onRefresh = viewModel::refreshMetrics) }
+                item { QuoteCard(state) }
                 item { ResourceCard(state) }
                 item { InstanceSummaryCard(state, onOpenInstances) }
                 item {
@@ -231,9 +246,9 @@ private fun NotConnectedContent(
     }
 }
 
-/** Daemon 状态卡：名称/协议/版本/在线实例数。 */
+/** Daemon 状态卡：名称/在线状态/协议/版本。 */
 @Composable
-private fun DaemonStatusCard(state: HomeUiState, onRefresh: () -> Unit) {
+private fun DaemonStatusCard(state: HomeUiState, online: Boolean?, onRefresh: () -> Unit) {
     Card(shape = RoundedCornerShape(16.dp)) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -246,10 +261,14 @@ private fun DaemonStatusCard(state: HomeUiState, onRefresh: () -> Unit) {
                 )
                 Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OnlineDot()
+                    OnlineDot(online)
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "在线 · ${state.protocol}",
+                        text = when (online) {
+                            null -> "检测中… · ${state.protocol}"
+                            true -> "在线 · ${state.protocol}"
+                            false -> "离线 · ${state.protocol}"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -279,13 +298,58 @@ private fun DaemonStatusCard(state: HomeUiState, onRefresh: () -> Unit) {
 }
 
 @Composable
-private fun OnlineDot() {
+private fun OnlineDot(online: Boolean?) {
+    val color = when (online) {
+        true -> statusColor(2)
+        false -> MaterialTheme.colorScheme.error
+        null -> MaterialTheme.colorScheme.outlineVariant
+    }
     Box(
         modifier = Modifier
             .size(10.dp)
             .clip(CircleShape)
-            .background(statusColor(2)),
+            .background(color),
     )
+}
+
+/** 每日一言卡：加载失败时展示兜底文案（不崩溃、不空白）。 */
+@Composable
+private fun QuoteCard(state: HomeUiState) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("每日一言", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            when {
+                state.quote.isNotBlank() -> {
+                    Text(
+                        text = "「${state.quote}」",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (state.quoteSource.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "—— ${state.quoteSource}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                state.quoteFailed -> Text(
+                    text = "一言加载失败，请检查网络连接",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> Text(
+                    text = "一言加载中…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 /** 负载监视卡：CPU / 内存 使用率进度条。 */
@@ -358,7 +422,7 @@ private fun InstanceSummaryCard(state: HomeUiState, onOpenInstances: () -> Unit)
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.List, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                Icon(Icons.AutoMirrored.Filled.List, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
                 Spacer(Modifier.width(8.dp))
                 Text("实例概览", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
             }
@@ -413,3 +477,10 @@ private fun formatTime(time: Long): String =
     SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(time))
 
 private fun Double.formatMetric(): String = String.format(Locale.US, "%.1f", this)
+
+/** 从任意 Compose Context 向上查找宿主 Activity。 */
+private tailrec fun Context.findActivity(): ComponentActivity? = when (this) {
+    is ComponentActivity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}

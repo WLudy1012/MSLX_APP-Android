@@ -20,6 +20,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
 import com.mslx.console.data.AppSettings
+import com.mslx.console.ui.ConnectivityHost
 import com.mslx.console.ui.ServerNotificationHelper
 import com.mslx.console.ui.navigation.AppNavHost
 import com.mslx.console.ui.navigation.Routes
@@ -86,6 +87,8 @@ class MainActivity : ComponentActivity() {
                 AppNavHost(settings = settings, navController = navController)
                 // 全局更新弹窗：启动自动检查 + 手动检查结果都走这里
                 UpdateHost()
+                // 连接连通性监视：5 秒一轮，在线→离线弹窗提醒
+                ConnectivityHost()
                 // 崩溃报告弹窗：上次会话发生未捕获异常时展示
                 CrashReportDialog()
                 // 首次开屏免责协议：5 秒后可确认，同意后持久化（仅真实加载后渲染）
