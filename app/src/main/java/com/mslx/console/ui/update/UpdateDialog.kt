@@ -28,7 +28,7 @@ import com.mslx.console.data.AppUpdateInfo
  * 全局更新弹窗宿主：挂载在导航根节点外层。
  * - 启动自动检查：发现新版本即弹窗；
  * - 设置页手动检查：结果也通过同一状态弹窗/提示；
- * - Actions 渠道：展示不稳定警告并在应用内下载安装调试 APK。
+ * - 所有渠道（稳定/测试/Actions）均在应用内下载并安装。
  */
 @Composable
 fun UpdateHost(
@@ -48,8 +48,7 @@ fun UpdateHost(
             update = update,
             downloading = state.downloadingActions,
             downloadProgress = state.downloadProgress,
-            onUpdate = { viewModel.openUpdate() },
-            onInstallActions = { viewModel.downloadAndInstallActions() },
+            onInstall = { viewModel.downloadAndInstall() },
             onSkip = { viewModel.skip() },
         )
     }
@@ -61,8 +60,7 @@ private fun UpdateDialog(
     update: AppUpdateInfo,
     downloading: Boolean,
     downloadProgress: Float,
-    onUpdate: () -> Unit,
-    onInstallActions: () -> Unit,
+    onInstall: () -> Unit,
     onSkip: () -> Unit,
 ) {
     AlertDialog(
@@ -147,15 +145,14 @@ private fun UpdateDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = if (update.actions) onInstallActions else onUpdate,
+                onClick = onInstall,
                 enabled = !downloading,
             ) {
                 Text(
                     text = when {
-                        update.actions && downloading -> "下载中…"
-                        update.actions -> "下载并安装"
-                        update.forceUpdate -> "立即更新"
-                        else -> "更新"
+                        downloading -> "下载中…"
+                        update.forceUpdate -> "立即下载并安装"
+                        else -> "下载并安装"
                     },
                     color = MaterialTheme.colorScheme.primary,
                 )

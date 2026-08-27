@@ -141,23 +141,10 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         _state.update { it.copy(update = null, downloadingActions = false, downloadProgress = 0f) }
     }
 
-    /** 用户选择"更新"：跳转浏览器下载 APK。仅放行 https 且 host 为 GitHub 下载域，防任意 scheme 拉起。 */
-    fun openUpdate() {
-        val url = _state.value.update?.downloadUrl ?: return
-        val uri = Uri.parse(url)
-        val allowedHosts = setOf("github.com", "www.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
-        val host = uri.host?.lowercase() ?: return
-        if (uri.scheme != "https" || host !in allowedHosts) return
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching { getApplication<Application>().startActivity(intent) }
-    }
-
-    /** Actions 渠道：应用内下载 dev 调试 APK 并拉起系统安装器。 */
-    fun downloadAndInstallActions() {
+    /** 应用内下载 APK 并拉起系统安装器（稳定版/测试版/Actions 全部走此路径）。 */
+    fun downloadAndInstall() {
         val update = _state.value.update ?: return
-        if (!update.actions || _state.value.downloadingActions) return
+        if (_state.value.downloadingActions) return
         val uri = Uri.parse(update.downloadUrl)
         val allowedHosts = setOf("github.com", "www.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
         val host = uri.host?.lowercase() ?: return
@@ -174,13 +161,13 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             result.onSuccess { file ->
-                AppLogger.i("Update", "Actions 构建下载完成 ${file.length()} bytes")
+                AppLogger.i("Update", "APK 下载完成 ${file.length()} bytes")
                 _state.update { it.copy(downloadingActions = false, update = null, downloadProgress = 0f) }
                 installApk(context, file)
             }.onFailure { e ->
-                AppLogger.w("Update", "Actions 构建下载失败", e)
+                AppLogger.w("Update", "APK 下载失败", e)
                 _state.update { it.copy(downloadingActions = false, downloadProgress = 0f) }
-                _message.tryEmit("Actions 构建下载失败：${e.message ?: "未知错误"}")
+                _message.tryEmit("APK 下载失败：${e.message ?: "未知错误"}")
             }
         }
     }

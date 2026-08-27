@@ -21,8 +21,9 @@ android {
         applicationId = "com.mslx.console"
         minSdk = 24
         targetSdk = 35
-        versionCode = 19
-        versionName = "1.2.16"
+        versionCode = 20
+        // CI Actions 构建会以 -PversionName=x.x.x.x 覆盖（见 android.yml Compute Actions version）
+        versionName = (project.findProperty("versionName") as String?) ?: "1.3"
     }
 
     signingConfigs {

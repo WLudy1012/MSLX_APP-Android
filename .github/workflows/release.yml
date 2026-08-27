@@ -71,13 +71,26 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
 
-      # 生成 release notes：把自上一个 tag 以来的所有提交拼成列表。
-      # 若没有上一个 tag（首个发布），则列出全部提交。
+      # 生成 release notes：取"上一版"并列出其到本版的全部提交。
+      # 层级规则（正式版 x.x / Beta x.x.x / Actions x.x.x.x）：
+      #   - 正式版/强制版：上一版 = 最近一个不带 -Beta 后缀的 v* tag（跳过中间所有 Beta，保证
+      #     release note 包含"直至上一正式版的全部 Beta 更新"）；
+      #   - Beta 版：上一版 = 最近一个带 -Beta 后缀的 v* tag（包含中间 Actions 更新）；若无，
+      #     回退到最近一个不带 -Beta 的 tag。
       - name: Generate release notes
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+          CUR_TAG="${{ github.ref_name }}"
+          IS_BETA=$(echo "$CUR_TAG" | grep -qiE -- '-beta$' && echo 1 || echo 0)
+          if [ "$IS_BETA" = "1" ]; then
+            PREV_TAG=$(git tag --list 'v*' | grep -iE -- '-beta$' | grep -v "^$CUR_TAG$" | sort -V | tail -1)
+            if [ -z "$PREV_TAG" ]; then
+              PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^$CUR_TAG$" | sort -V | tail -1)
+            fi
+          else
+            PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^$CUR_TAG$" | sort -V | tail -1)
+          fi
           {
-            echo "# MSLX_APP-Android ${{ github.ref_name }}"
+            echo "# MSLX_APP-Android $CUR_TAG"
             echo ""
             if [ -n "$PREV_TAG" ]; then
               echo "自 $PREV_TAG 以来的提交："

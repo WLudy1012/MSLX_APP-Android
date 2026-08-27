@@ -17,7 +17,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # 生成 dev 构建说明时需要短 SHA 与提交信息
+          # 生成 dev 构建说明与 Actions 版本号时需要 tag 与提交信息
           fetch-depth: 0
 
       - name: Set up JDK 17
@@ -56,11 +56,36 @@ jobs:
           keyPassword=$KEY_PASSWORD
           EOF
 
+      # Actions 版本号规则（x.x.x.x，四段）：
+      #   取最近一个 v* tag（去掉 v 与 -Beta/-Force 后缀）作为基准并补齐到三段，
+      #   再追加 .$GITHUB_RUN_NUMBER 作为第四段（本仓库累计运行号）。
+      #   示例：稳定 v1.15 → 1.15.0.12；beta v1.15.1 → 1.15.1.12。
+      - name: Compute Actions version (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          BASE="1.2.16"
+          if [ -n "$LATEST_TAG" ]; then
+            CLEAN=$(echo "$LATEST_TAG" | sed -E 's/^v//; s/-(Beta|Force)$//I')
+            case "$CLEAN" in
+              [0-9]*.[0-9]*.[0-9]*.[0-9]*) BASE="$CLEAN" ;;   # 4+ 段：直接使用
+              [0-9]*.[0-9]*.[0-9]*)        BASE="$CLEAN" ;;   # 3 段（beta）：直接使用
+              [0-9]*.[0-9]*)               BASE="$CLEAN.0" ;; # 2 段（稳定）：补第三段 0
+              *)                           BASE="1.2.16" ;;
+            esac
+          fi
+          echo "ACTIONS_VERSION=${BASE}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "ACTIONS_VERSION=${BASE}.${GITHUB_RUN_NUMBER}"
+
       # 无 keystore 时 release 会产出未签名包，仅用于验证可编译性
       - name: Build debug & release APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+          if [ -n "$ACTIONS_VERSION" ]; then
+            ./gradlew assembleDebug assembleRelease -PversionName="$ACTIONS_VERSION" --no-daemon --stacktrace
+          else
+            ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+          fi
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -72,17 +97,16 @@ jobs:
       # 注：GitHub Actions 工件 zip 下载需要认证，应用无法直接拉取，故用公开 Release 承载。
       - name: Publish debug APK to dev release (main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_SHA_SHORT: ${{ github.sha }}
         run: |
           SHA=$(sha256sum app/build/outputs/apk/debug/app-debug.apk | awk '{print $1}')
           {
             echo "# MSLX_APP-Android Actions 调试构建（不稳定）"
             echo ""
-            echo "- 提交：\`${GH_SHA_SHORT:0:7}\`"
+            echo "- 版本：\`$ACTIONS_VERSION\`"
+            echo "- 提交：\`${GITHUB_SHA:0:7}\`"
             echo "- 分支：main"
             echo "- 构建时间：$(date -u '+%Y-%m-%d %H:%M UTC')"
-            echo "- 签名：正式签名（可覆盖安装正式版，但需先卸载同版本号或版本号更高时可直接覆盖）"
+            echo "- 签名：正式签名（可覆盖安装正式版）"
             echo ""
             echo "## 校验"
             echo ""
@@ -98,5 +122,8 @@ jobs:
           name: "dev (Actions 调试构建)"
           body_path: dev_release_notes.md
           files: app/build/outputs/apk/debug/app-debug.apk
-          update_existing: true
+          # v2 对已存在同名 release 自动更新；overwrite_files 覆盖同名 APK 资产；
+          # make_latest=false 防止 dev 被标记为 GitHub 最新 Release（影响 About 页 latestRelease）。
+          overwrite_files: true
           fail_on_unmatched_files: true
+          make_latest: false
