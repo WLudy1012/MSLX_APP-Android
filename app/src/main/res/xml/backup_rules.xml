@@ -11,4 +11,14 @@
     <exclude
         domain="file"
         path="datastore/settings.preferences_pb.tmp" />
+    <!-- 运行日志与崩溃报告：含主机地址/文件路径/异常堆栈等本地敏感信息，不参与云备份 -->
+    <exclude
+        domain="file"
+        path="logs/app.log" />
+    <exclude
+        domain="file"
+        path="logs/app.log.1" />
+    <exclude
+        domain="file"
+        path="logs/crash.log" />
 </full-backup-content>

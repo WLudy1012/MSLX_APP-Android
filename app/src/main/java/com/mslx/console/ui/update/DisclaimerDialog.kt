@@ -43,11 +43,14 @@ private val DISCLAIMER_TEXT = """
    由此造成的数据丢失、服务中断、系统损坏或其他损失,由使用者自行承担。
 3. 本应用允许连接您自己的 MSLX 守护进程(MSLX Daemon)。请确保您拥有对该守护进程及其所管理
    资源的合法使用权限,并自行承担连接与操作带来的全部风险。
+4. 在用户明确勾选"允许 HTTP"时,本应用会通过明文 HTTP 传输数据(含 API Key),仅建议在
+   完全可信的内网环境使用;由此产生的被窃听、篡改等风险由使用者自行承担。
 
 三、开源许可
 
-本应用基于 GNU Affero General Public License v3.0 (AGPL-3.0) 开源,源码见项目仓库。
-上游 MSLX 项目同样基于 AGPL-3.0 开源,详见其项目仓库。
+本应用基于 GNU Affero General Public License v3.0 (AGPL-3.0) 开源,
+源码见项目仓库 https://github.com/WLudy1012/MSLX_APP-Android。
+上游 MSLX 项目同样基于 AGPL-3.0 开源,详见其项目仓库 https://github.com/MSLTeam/MSLX。
 
 四、同意
 

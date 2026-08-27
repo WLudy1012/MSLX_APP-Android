@@ -1,6 +1,7 @@
 package com.mslx.console.data
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.os.Build
 import java.io.File
 import java.io.FileWriter
@@ -28,6 +29,7 @@ object AppLogger {
 
     private var logDir: File? = null
     private var appVersion: String = "unknown"
+    private var debugBuild: Boolean = false
 
     private val dateFormat = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
 
@@ -37,15 +39,17 @@ object AppLogger {
         appVersion = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()
         }.getOrDefault("unknown")
+        debugBuild = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         val dir = File(context.filesDir, LOG_DIR).apply { mkdirs() }
         logDir = dir
         installCrashHandler()
         i("AppLogger", "日志已初始化 pid=${android.os.Process.myPid()} " +
-            "version=$appVersion sdk=${Build.VERSION.SDK_INT} os=${android.os.Build.VERSION.RELEASE}")
+            "version=$appVersion sdk=${Build.VERSION.SDK_INT} os=${android.os.Build.VERSION.RELEASE} debug=$debugBuild")
     }
 
-    fun v(tag: String, message: String) = write("V", tag, message, null)
-    fun d(tag: String, message: String) = write("D", tag, message, null)
+    /** release 构建关闭 verbose/debug 级别，仅保留 info/warn/error（对齐日志纪律）。 */
+    fun v(tag: String, message: String) { if (debugBuild) write("V", tag, message, null) }
+    fun d(tag: String, message: String) { if (debugBuild) write("D", tag, message, null) }
     fun i(tag: String, message: String) = write("I", tag, message, null)
     fun w(tag: String, message: String, throwable: Throwable? = null) = write("W", tag, message, throwable)
     fun e(tag: String, message: String, throwable: Throwable? = null) = write("E", tag, message, throwable)

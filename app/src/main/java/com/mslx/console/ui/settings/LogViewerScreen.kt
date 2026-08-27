@@ -48,6 +48,8 @@ fun LogViewerScreen(onBack: () -> Unit) {
     var confirmClear by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
+    // 只渲染末尾 200K 字符，避免单个 Text 渲染 1MB 日志造成卡顿；复制/导出仍用全文
+    val displayLogs = logs.takeLast(200_000)
 
     Scaffold(
         topBar = {
@@ -91,8 +93,15 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     modifier = Modifier.padding(top = 10.dp),
                 )
             }
+            if (logs.length > 200_000) {
+                Text(
+                    text = "页面仅显示末尾 20 万字符，完整日志请复制或导出",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
-                text = logs.ifBlank { "暂无日志" },
+                text = displayLogs.ifBlank { "暂无日志" },
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
