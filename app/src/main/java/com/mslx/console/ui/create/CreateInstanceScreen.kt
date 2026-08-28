@@ -164,8 +164,14 @@ fun CreateInstanceScreen(
     }
 
     if (state.coreSelectorVisible) {
+        // 基岩版模式（mode==3）只展示基岩版分类：全量分类保留在 state，显示时按 mode 过滤
+        val visibleCategories = if (state.mode == 3) {
+            state.coreCategories.filter { it.key == "bedrock" }
+        } else {
+            state.coreCategories
+        }
         CoreSelectorDialog(
-            categories = state.coreCategories,
+            categories = visibleCategories,
             selectedCategoryKey = state.selectedCategoryKey,
             selectedCoreName = state.selectedCoreName,
             versions = state.coreVersions,

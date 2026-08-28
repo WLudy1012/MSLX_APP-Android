@@ -264,8 +264,8 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                         CoreCategory("bedrock", "基岩版第三方", "基岩版服务端", classify.bedrockCore),
                         CoreCategory("proxy", "代理服务端", "BungeeCord/Velocity", classify.proxyCore),
                     )
-                    // 基岩版模式（mode==3）只允许选择基岩版核心
-                    val categories = if (_state.value.mode == 3) all.filter { it.key == "bedrock" } else all
+                    // 全量分类保留在 state；基岩版模式（mode==3）由界面显示时过滤为仅 bedrock
+                    val categories = all
                     _state.update {
                         it.copy(
                             coreCategories = categories,
@@ -282,7 +282,10 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun openCoreSelector() {
-        _state.update { it.copy(coreSelectorVisible = true) }
+        _state.update {
+            // 基岩版模式强制从基岩版分类开始
+            it.copy(coreSelectorVisible = true, selectedCategoryKey = if (it.mode == 3) "bedrock" else it.selectedCategoryKey)
+        }
     }
 
     fun closeCoreSelector() {
@@ -290,6 +293,8 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun selectCategory(key: String) {
+        // 基岩版模式只允许基岩版分类（双保险，界面已过滤）
+        if (_state.value.mode == 3 && key != "bedrock") return
         _state.update {
             it.copy(
                 selectedCategoryKey = key,

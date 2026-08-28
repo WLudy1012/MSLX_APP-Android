@@ -14,7 +14,7 @@ import javax.net.ssl.X509TrustManager
 object ApiClient {
 
     /** 客户端 User-Agent（发版时与 build.gradle.kts 的 versionName 保持同步）。 */
-    private const val USER_AGENT = "MSLX-Android/1.5"
+    private const val USER_AGENT = "MSLX-Android/1.5.1"
 
     fun build(baseUrl: String, apiKey: String): MslxApi {
         val builder = OkHttpClient.Builder()
