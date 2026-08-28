@@ -22,6 +22,7 @@ import com.mslx.console.ui.TopPage
 import com.mslx.console.ui.connect.ConnectScreen
 import com.mslx.console.ui.console.ConsoleScreen
 import com.mslx.console.ui.create.CreateInstanceScreen
+import com.mslx.console.ui.create.CreateResetBus
 import com.mslx.console.ui.home.HomeScreen
 import com.mslx.console.ui.instances.InstancesScreen
 import com.mslx.console.ui.settings.InstanceSettingsScreen
@@ -324,7 +325,14 @@ fun AppNavHost(
         currentTopPage?.let { topPage ->
             MainBottomNav(
                 current = topPage,
-                onNavigate = { page -> navigateTopLevel(topLevelRoute(page)) },
+                onNavigate = { page ->
+                    if (page == TopPage.NEW_INSTANCE && topPage == TopPage.NEW_INSTANCE) {
+                        // 重按"新建"tab：重置新建实例表单（Dock 与页面 ViewModel 经 CreateResetBus 桥接）
+                        CreateResetBus.request()
+                    } else {
+                        navigateTopLevel(topLevelRoute(page))
+                    }
+                },
             )
         }
     }

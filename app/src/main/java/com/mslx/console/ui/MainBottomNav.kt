@@ -92,7 +92,8 @@ private fun RowScope.DockItem(
         modifier = Modifier
             .fillMaxHeight()
             .weight(1f)
-            .clickable(onClick = { if (!selected) onNavigate(page) }),
+            // 始终回调：重按当前 tab 由外层决定行为（如重按"新建"重置表单）
+            .clickable(onClick = { onNavigate(page) }),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {

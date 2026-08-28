@@ -21,6 +21,20 @@ import kotlinx.coroutines.launch
 private const val EULA_AGREED_CONTENT =
     "#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\n#MSLX-Android auto agreed\neula=true\n"
 
+/**
+ * 「重按新建 tab 重置表单」的跨层事件通道：底部 Dock 在 NavHost 外层（AppNavHost），
+ * 而表单状态在页面内的 CreateInstanceViewModel，两者通过此单例桥接。
+ */
+object CreateResetBus {
+    private val _events = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val events = _events.asSharedFlow()
+
+    /** 请求重置新建实例表单（由 Dock 重按新建 tab 触发）。 */
+    fun request() {
+        _events.tryEmit(Unit)
+    }
+}
+
 data class CoreCategory(
     val key: String,
     val name: String,

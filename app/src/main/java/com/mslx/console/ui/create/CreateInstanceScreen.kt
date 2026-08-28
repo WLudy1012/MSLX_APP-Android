@@ -92,6 +92,11 @@ fun CreateInstanceScreen(
         viewModel.message.collect { snackbarHostState.showSnackbar(it) }
     }
 
+    // 重按"新建"tab（Dock 在 NavHost 外层）→ 重置表单
+    LaunchedEffect(Unit) {
+        CreateResetBus.events.collect { viewModel.reset() }
+    }
+
     val jarLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             scope.launch {
