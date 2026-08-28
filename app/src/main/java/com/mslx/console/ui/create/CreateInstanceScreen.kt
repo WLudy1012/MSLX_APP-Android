@@ -15,6 +15,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -120,46 +122,54 @@ fun CreateInstanceScreen(
         topBar = { TopAppBar(title = { Text("新建实例", fontWeight = FontWeight.Bold) }) },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
-        when {
-            state.success -> SuccessContent(
-                serverId = state.createdServerId,
-                onOpenConsole = {
-                    val id = state.createdServerId.toLongOrNull() ?: 0L
-                    // 离开创建页前重置表单，避免下次进入仍停留在成功页/残留旧数据
-                    viewModel.reset()
-                    onOpenConsole(id)
-                },
-                onReset = viewModel::reset,
-                onBackToList = {
-                    // 返回实例列表同样重置，防止删除实例后误进旧实例控制台
-                    viewModel.reset()
-                    onOpenInstances()
-                },
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
-            )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                // 键盘弹起时底部按钮上移，避免被 IME 遮挡
+                .imePadding(),
+        ) {
+            when {
+                state.success -> SuccessContent(
+                    serverId = state.createdServerId,
+                    onOpenConsole = {
+                        val id = state.createdServerId.toLongOrNull() ?: 0L
+                        // 离开创建页前重置表单，避免下次进入仍停留在成功页/残留旧数据
+                        viewModel.reset()
+                        onOpenConsole(id)
+                    },
+                    onReset = viewModel::reset,
+                    onBackToList = {
+                        // 返回实例列表同样重置，防止删除实例后误进旧实例控制台
+                        viewModel.reset()
+                        onOpenInstances()
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
 
-            state.creating -> CreatingContent(
-                serverId = state.createdServerId,
-                progress = state.creationProgress,
-                logs = state.creationLogs,
-                onCancel = viewModel::cancelCreation,
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
-            )
+                state.creating -> CreatingContent(
+                    serverId = state.createdServerId,
+                    progress = state.creationProgress,
+                    logs = state.creationLogs,
+                    onCancel = viewModel::cancelCreation,
+                    modifier = Modifier.fillMaxSize(),
+                )
 
-            else -> FormContent(
-                state = state,
-                onUpdate = viewModel::update,
-                onModeChange = viewModel::setMode,
-                onNext = viewModel::nextStep,
-                onPrev = viewModel::prevStep,
-                onOpenCoreSelector = viewModel::openCoreSelector,
-                onClearCore = viewModel::clearCoreSelection,
-                onRemoveUpload = viewModel::removeUploadedCore,
-                onPickJar = { jarLauncher.launch("application/java-archive") },
-                onPickPackage = { packageLauncher.launch("*/*") },
-                onSubmit = viewModel::submit,
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
-            )
+                else -> FormContent(
+                    state = state,
+                    onUpdate = viewModel::update,
+                    onModeChange = viewModel::setMode,
+                    onNext = viewModel::nextStep,
+                    onPrev = viewModel::prevStep,
+                    onOpenCoreSelector = viewModel::openCoreSelector,
+                    onClearCore = viewModel::clearCoreSelection,
+                    onRemoveUpload = viewModel::removeUploadedCore,
+                    onPickJar = { jarLauncher.launch("application/java-archive") },
+                    onPickPackage = { packageLauncher.launch("*/*") },
+                    onSubmit = viewModel::submit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 

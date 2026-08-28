@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,9 +48,9 @@ fun MainBottomNav(
     current: TopPage,
     onNavigate: (TopPage) -> Unit,
 ) {
-    // 显式限定 Dock 高度：DockItem 内使用 fillMaxHeight 填充，若不加高度上限，
-    // NavigationBar 会按子项约束把 Dock 撑满整个父容器（占满全屏）
-    NavigationBar(modifier = Modifier.height(64.dp)) {
+    // 条目高度固定 64dp（不用 fillMaxHeight：当前 M3 的 NavigationBar 内层 Row 高度由子项决定，
+    // fillMaxHeight 会把 Dock 撑满父容器；手势导航条的 inset 由 NavigationBar 自行叠加在内容高度之上）
+    NavigationBar {
         TopPage.entries.forEach { page ->
             DockItem(
                 page = page,
@@ -92,7 +91,7 @@ private fun RowScope.DockItem(
 
     Box(
         modifier = Modifier
-            .fillMaxHeight()
+            .height(64.dp)
             .weight(1f)
             // 始终回调：重按当前 tab 由外层决定行为（如重按"新建"重置表单）
             .clickable(onClick = { onNavigate(page) }),
