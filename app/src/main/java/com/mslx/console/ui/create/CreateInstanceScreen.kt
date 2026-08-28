@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -68,8 +69,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mslx.console.ui.MainBottomNav
-import com.mslx.console.ui.TopPage
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -111,20 +110,9 @@ fun CreateInstanceScreen(
     }
 
     Scaffold(
+        // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = { TopAppBar(title = { Text("新建实例", fontWeight = FontWeight.Bold) }) },
-        bottomBar = {
-            MainBottomNav(
-                current = TopPage.NEW_INSTANCE,
-                onNavigate = { page ->
-                    when (page) {
-                        TopPage.HOME -> onOpenHome()
-                        TopPage.INSTANCES -> onOpenInstances()
-                        TopPage.NEW_INSTANCE -> viewModel.reset()
-                        TopPage.SETTINGS -> onOpenSettings()
-                    }
-                },
-            )
-        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         when {

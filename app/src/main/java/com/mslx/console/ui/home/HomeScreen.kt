@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -51,8 +52,6 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.ui.ConnectivityViewModel
-import com.mslx.console.ui.MainBottomNav
-import com.mslx.console.ui.TopPage
 import com.mslx.console.ui.statusColor
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -86,19 +85,8 @@ fun HomeScreen(
     }
 
     Scaffold(
-        bottomBar = {
-            MainBottomNav(
-                current = TopPage.HOME,
-                onNavigate = { page ->
-                    when (page) {
-                        TopPage.HOME -> {}
-                        TopPage.INSTANCES -> onOpenInstances()
-                        TopPage.NEW_INSTANCE -> onOpenNewInstance()
-                        TopPage.SETTINGS -> onOpenSettings()
-                    }
-                },
-            )
-        },
+        // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(title = { Text("主页", fontWeight = FontWeight.Bold) })
         },
