@@ -5,10 +5,11 @@
     </style>
 
     <!-- Android 12+ 系统开屏(SplashScreen)，由 androidx.core:core-splashscreen 提供兼容。
-         背景与图标和应用内 SplashScreen(BrandTeal + mslx_logo)保持一致，避免先静态后动态的割裂感。 -->
+         背景与 Compose SplashScreen(BrandTeal)一致；图标用自适应前景(内容在安全区内)，
+         避免系统圆形遮罩把满幅 logo 裁切导致显示不完全。 -->
     <style name="Theme.MSLXConsole.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/mslx_logo</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
         <item name="postSplashScreenTheme">@style/Theme.MSLXConsole</item>
     </style>
 </resources>
