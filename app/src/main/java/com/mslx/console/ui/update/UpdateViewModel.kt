@@ -38,6 +38,16 @@ data class UpdateUiState(
 
 class UpdateViewModel(application: Application) : AndroidViewModel(application) {
 
+    /** 更新 APK 下载允许的域名（GitHub 本体与下载 CDN），防止任意主机/任意 scheme 拉起安装。 */
+    private companion object {
+        val ALLOWED_DOWNLOAD_HOSTS = setOf(
+            "github.com",
+            "www.github.com",
+            "objects.githubusercontent.com",
+            "release-assets.githubusercontent.com",
+        )
+    }
+
     private val repository = getApplication<MSLXApplication>().container.updateRepository
     private val store = getApplication<MSLXApplication>().container.settingsStore
 
@@ -146,9 +156,8 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         val update = _state.value.update ?: return
         if (_state.value.downloadingActions) return
         val uri = Uri.parse(update.downloadUrl)
-        val allowedHosts = setOf("github.com", "www.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
         val host = uri.host?.lowercase() ?: return
-        if (uri.scheme != "https" || host !in allowedHosts) {
+        if (uri.scheme != "https" || host !in ALLOWED_DOWNLOAD_HOSTS) {
             _message.tryEmit("下载地址不合法，已取消")
             return
         }
@@ -172,7 +181,7 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 下载 APK 到 filesDir/apks/app-debug.apk（带进度回调）。 */
+    /** 下载 APK 到 filesDir/apks/mslx-update.apk（带进度回调）。 */
     private suspend fun downloadToFile(context: Context, url: String): File {
         val request = okhttp3.Request.Builder().url(url).build()
         val client = okhttp3.OkHttpClient.Builder()
@@ -181,10 +190,15 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
+            // 校验重定向后的最终域名仍在白名单内，防止被 30x 跳转到非信任主机
+            val finalHost = response.request.url.host?.lowercase().orEmpty()
+            if (finalHost !in ALLOWED_DOWNLOAD_HOSTS) {
+                throw IllegalStateException("下载跳转到非信任域名：$finalHost")
+            }
             val body = response.body ?: throw IllegalStateException("响应为空")
             val total = body.contentLength()
             val dir = File(context.filesDir, "apks").apply { mkdirs() }
-            val target = File(dir, "app-debug.apk")
+            val target = File(dir, "mslx-update.apk")
             body.byteStream().use { input ->
                 target.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
@@ -200,9 +214,20 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }
+            // 魔数校验：APK 为 ZIP 格式（PK\x03\x04），防止下载到错误内容仍触发安装器
+            if (!hasZipMagic(target)) {
+                throw IllegalStateException("下载内容不是有效的 APK")
+            }
             return target
         }
     }
+
+    /** 校验文件开头是否为 ZIP/APK 魔数（PK\x03\x04）。 */
+    private fun hasZipMagic(file: File): Boolean = runCatching {
+        val magic = ByteArray(4)
+        java.io.FileInputStream(file).use { it.read(magic) }
+        magic[0] == 0x50.toByte() && magic[1] == 0x4B.toByte() && magic[2] == 0x03.toByte() && magic[3] == 0x04.toByte()
+    }.getOrDefault(false)
 
     /** 通过 FileProvider 拉起系统安装器。 */
     private fun installApk(context: Context, file: File) {

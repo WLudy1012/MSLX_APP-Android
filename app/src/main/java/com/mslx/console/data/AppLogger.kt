@@ -26,6 +26,7 @@ object AppLogger {
     private const val LOG_FILE = "app.log"
     private const val CRASH_FILE = "crash.log"
     private const val MAX_BYTES = 1L * 1024L * 1024L // 1MB
+    private const val LOG_MAX_AGE_DAYS = 3L // 超过 3 天的日志自动删除
 
     private var logDir: File? = null
     private var appVersion: String = "unknown"
@@ -42,9 +43,27 @@ object AppLogger {
         debugBuild = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         val dir = File(context.filesDir, LOG_DIR).apply { mkdirs() }
         logDir = dir
+        // 先清理超过 3 天的过期日志（低日志量时 app.log 可能长期不轮转），再记录初始化日志
+        cleanupOldLogs()
         installCrashHandler()
         i("AppLogger", "日志已初始化 pid=${android.os.Process.myPid()} " +
             "version=$appVersion sdk=${Build.VERSION.SDK_INT} os=${android.os.Build.VERSION.RELEASE} debug=$debugBuild")
+    }
+
+    /**
+     * 清理超过 [maxAgeDays] 天未修改的日志文件（app.log / app.log.1 / crash.log 等）。
+     * 每次应用启动时调用一次。
+     */
+    fun cleanupOldLogs(maxAgeDays: Long = LOG_MAX_AGE_DAYS) {
+        val dir = logDir ?: return
+        val cutoff = System.currentTimeMillis() - maxAgeDays * 24 * 60 * 60 * 1000L
+        runCatching {
+            dir.listFiles()?.forEach { file ->
+                if (file.isFile && file.lastModified() < cutoff) {
+                    file.delete()
+                }
+            }
+        }
     }
 
     /** release 构建关闭 verbose/debug 级别，仅保留 info/warn/error（对齐日志纪律）。 */
