@@ -108,6 +108,8 @@ app/src/main/java/com/mslx/console/
   - 稳定渠道只接收正式版；测试渠道同时接收稳定版 + Beta 版。
   - **Actions 调试构建**：直接从 GitHub Actions 拉取最新 main 分支调试 APK。该渠道**不稳定**，切换时会弹出警告。
 - **所有渠道均应用内下载并安装**（下载进度条 → 系统安装器），不再跳转浏览器。
+- **CNB 镜像（cnb.cool）为首选更新源**：应用优先从 `https://cnb.cool/WLudy/MSLX_APP-Android` 下载更新 APK，
+  失败时自动回退 GitHub Releases（大陆网络环境下载更快、更稳）。
 - Release 说明规则：正式版包含自上一正式版以来的全部更新（含中间 Beta）；Beta 版包含自上一 Beta 以来的全部更新（含中间 Actions 构建）。
 
 ## 📜 开源协议
@@ -123,10 +125,12 @@ Copyright (C) 2026 WLudy1012
 可能涉及数据修改、文件读写、进程启停等操作，由此产生的一切后果由使用者自行承担。
 完整声明见 [DISCLAIMER.txt](DISCLAIMER.txt)，首次启动时需阅读并同意。
 
-## 🤖 持续集成（GitHub Actions）
+## 🤖 持续集成（GitHub Actions / CNB）
 
 - **android.yml**：`main` 分支 push / PR 时自动构建 debug 与 release（未签名）APK，并上传 debug APK 工件；
   main push 时还会用正式签名构建 debug APK（可直接覆盖安装正式版），并发布到 `dev` Release 供「Actions 调试构建」渠道拉取。
+- **CNB 云构建（.cnb.yml）**：镜像仓库 https://cnb.cool/WLudy/MSLX_APP-Android 上，main push 自动构建 debug APK；
+  `v*` tag 推送时从密钥仓库恢复签名、构建 release APK 并发布 CNB Release（应用首选更新源）。
 - **release.yml**：推送 `v*` 标签时，使用仓库 Secrets 恢复签名密钥，构建签名 release APK 并自动附加到对应 Release。
 
 ### release.yml 所需 Secrets

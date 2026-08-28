@@ -70,6 +70,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.ui.MainBottomNav
 import com.mslx.console.ui.TopPage
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -129,9 +130,18 @@ fun CreateInstanceScreen(
         when {
             state.success -> SuccessContent(
                 serverId = state.createdServerId,
-                onOpenConsole = { onOpenConsole(state.createdServerId.toLongOrNull() ?: 0L) },
+                onOpenConsole = {
+                    val id = state.createdServerId.toLongOrNull() ?: 0L
+                    // 离开创建页前重置表单，避免下次进入仍停留在成功页/残留旧数据
+                    viewModel.reset()
+                    onOpenConsole(id)
+                },
                 onReset = viewModel::reset,
-                onBackToList = onOpenInstances,
+                onBackToList = {
+                    // 返回实例列表同样重置，防止删除实例后误进旧实例控制台
+                    viewModel.reset()
+                    onOpenInstances()
+                },
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
             )
 
@@ -417,21 +427,6 @@ private fun JavaStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanceUiS
     ) }
 }
 
-private fun recommendedJavaFor(gameVersion: String): Int? {
-    val version = gameVersion.trim().removePrefix("v")
-    val match = Regex("^(\\d+)\\.(\\d+)(?:\\.(\\d+))?").find(version) ?: return null
-    val major = match.groupValues[1].toIntOrNull() ?: return null
-    val minor = match.groupValues[2].toIntOrNull() ?: return null
-    val patch = match.groupValues.getOrNull(3)?.toIntOrNull() ?: 0
-    if (major >= 26) return 25
-    if (major != 1) return null
-    return when {
-        minor <= 16 -> 8
-        minor <= 20 && (minor < 20 || patch <= 4) -> 17
-        else -> 21
-    }
-}
-
 /** 暂存的"仍要使用非推荐版本"的选择;本地 Java 额外记录 path,确认时写回 customJavaPath。 */
 private data class PendingJava(val type: String, val version: String, val localPath: String? = null)
 
@@ -594,16 +589,26 @@ private fun MemoryField(
     onUnitChange: (String) -> Unit,
     onValueChange: (Int) -> Unit,
 ) {
-    val display = if (unit == "GB") (valueMb / 1024f).let { if (it % 1f == 0f) it.toInt().toString() else String.format("%.1f", it) } else valueMb.toString()
+    // 本地文本态：允许清空/输入中间态（如 "1."），只有合法正数才写回父级，
+    // 修复"数字仅剩一位时无法删除"的问题
+    var text by remember { mutableStateOf(formatMemory(valueMb, unit)) }
+    // 单位切换或外部重置（如 viewModel.reset）时同步显示
+    LaunchedEffect(unit, valueMb) {
+        text = formatMemory(valueMb, unit)
+    }
     Column {
         Text(label, style = MaterialTheme.typography.labelLarge)
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                value = display,
-                onValueChange = { text ->
-                    val num = text.toFloatOrNull() ?: return@OutlinedTextField
-                    onValueChange(if (unit == "GB") (num * 1024).toInt().coerceAtLeast(1) else num.toInt().coerceAtLeast(1))
+                value = text,
+                onValueChange = { input ->
+                    val filtered = sanitizeMemoryInput(input)
+                    text = filtered
+                    val num = filtered.toFloatOrNull()
+                    if (num != null && num > 0f) {
+                        onValueChange(if (unit == "GB") (num * 1024).toInt().coerceAtLeast(1) else num.toInt().coerceAtLeast(1))
+                    }
                 },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -616,6 +621,23 @@ private fun MemoryField(
             }
         }
     }
+}
+
+/** 只保留数字与一个小数点，小数部分最多 2 位（与 [formatMemory] 的精度一致，避免输入回弹）。 */
+private fun sanitizeMemoryInput(input: String): String {
+    val filtered = input.filter { it.isDigit() || it == '.' }
+    val dot = filtered.indexOf('.')
+    if (dot < 0) return filtered
+    val head = filtered.substring(0, dot + 1)
+    val tail = filtered.substring(dot + 1).filter { it.isDigit() }.take(2)
+    return head + tail
+}
+
+/** MB → 显示文本：GB 模式最多 2 位小数并去掉尾零（1024 → "1"，512 → "0.5"，256 → "0.25"）。 */
+private fun formatMemory(valueMb: Int, unit: String): String {
+    if (unit != "GB") return valueMb.toString()
+    val gb = valueMb / 1024.0
+    return String.format(Locale.US, "%.2f", gb).trimEnd('0').trimEnd('.')
 }
 
 @Composable

@@ -38,9 +38,10 @@ data class UpdateUiState(
 
 class UpdateViewModel(application: Application) : AndroidViewModel(application) {
 
-    /** 更新 APK 下载允许的域名（GitHub 本体与下载 CDN），防止任意主机/任意 scheme 拉起安装。 */
+    /** 更新 APK 下载允许的域名（CNB 镜像 + GitHub 本体与下载 CDN），防止任意主机/任意 scheme 拉起安装。 */
     private companion object {
         val ALLOWED_DOWNLOAD_HOSTS = setOf(
+            "cnb.cool",
             "github.com",
             "www.github.com",
             "objects.githubusercontent.com",
@@ -151,32 +152,52 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         _state.update { it.copy(update = null, downloadingActions = false, downloadProgress = 0f) }
     }
 
-    /** 应用内下载 APK 并拉起系统安装器（稳定版/测试版/Actions 全部走此路径）。 */
+    /**
+     * 应用内下载 APK 并拉起系统安装器（稳定版/测试版/Actions 全部走此路径）。
+     * 下载源顺序：CNB 镜像首选 → GitHub 回退（任一源失败自动尝试下一个）。
+     */
     fun downloadAndInstall() {
         val update = _state.value.update ?: return
         if (_state.value.downloadingActions) return
-        val uri = Uri.parse(update.downloadUrl)
-        val host = uri.host?.lowercase() ?: return
-        if (uri.scheme != "https" || host !in ALLOWED_DOWNLOAD_HOSTS) {
+        val candidates = listOfNotNull(update.cnbUrl?.takeIf { it.isNotBlank() }, update.downloadUrl)
+            .mapNotNull { url ->
+                val uri = Uri.parse(url)
+                val host = uri.host?.lowercase()
+                if (uri.scheme == "https" && host != null && host in ALLOWED_DOWNLOAD_HOSTS) url else null
+            }
+            .distinct()
+        if (candidates.isEmpty()) {
             _message.tryEmit("下载地址不合法，已取消")
             return
         }
         _state.update { it.copy(downloadingActions = true, downloadProgress = 0f) }
         viewModelScope.launch {
             val context = getApplication<Application>()
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    downloadToFile(context, update.downloadUrl)
+            var downloaded: File? = null
+            var lastError: Throwable? = null
+            for (url in candidates) {
+                _state.update { it.copy(downloadProgress = 0f) }
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { downloadToFile(context, url) }
                 }
+                result.onSuccess { file ->
+                    downloaded = file
+                    lastError = null
+                }.onFailure { e ->
+                    lastError = e
+                    AppLogger.w("Update", "下载源失败，尝试下一个：$url", e)
+                }
+                if (downloaded != null) break
             }
-            result.onSuccess { file ->
+            val file = downloaded
+            if (file != null) {
                 AppLogger.i("Update", "APK 下载完成 ${file.length()} bytes")
                 _state.update { it.copy(downloadingActions = false, update = null, downloadProgress = 0f) }
                 installApk(context, file)
-            }.onFailure { e ->
-                AppLogger.w("Update", "APK 下载失败", e)
+            } else {
+                AppLogger.w("Update", "APK 下载失败（所有源均失败）", lastError)
                 _state.update { it.copy(downloadingActions = false, downloadProgress = 0f) }
-                _message.tryEmit("APK 下载失败：${e.message ?: "未知错误"}")
+                _message.tryEmit("APK 下载失败：${lastError?.message ?: "未知错误"}")
             }
         }
     }

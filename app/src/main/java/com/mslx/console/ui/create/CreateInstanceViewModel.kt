@@ -337,13 +337,21 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     }
 
     private fun applyCoreSelection(core: String, version: String, info: ServerCoreDownloadInfo) {
-        _state.update {
-            it.copy(
+        _state.update { s ->
+            // 选择核心版本后，按版本自动选中推荐 Java（在线下载与 Docker 预设同步），
+            // 修复"建议 Java 8 却默认下载 Java 21/25"的问题
+            val recommended = recommendedJavaFor(version)
+            val recommendedOnline = recommended?.let { r ->
+                s.onlineJavaVersions.firstOrNull { v -> v.toIntOrNull() == r }
+            }
+            s.copy(
                 core = "$core-$version.jar",
                 coreUrl = info.url,
                 coreSha256 = info.sha256.orEmpty(),
                 coreFileKey = "",
                 onlineGameVersion = version,
+                selectedJavaVersion = recommendedOnline ?: s.selectedJavaVersion,
+                dockerImagePresetVersion = recommended?.toString() ?: s.dockerImagePresetVersion,
                 coreSelectorLoading = false,
                 coreSelectorVisible = false,
                 buildsVisible = false,
@@ -603,5 +611,24 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     override fun onCleared() {
         creationClient?.disconnect()
         super.onCleared()
+    }
+}
+
+/**
+ * 根据 Minecraft 版本推荐 Java 主版本（与 MSLAPI 推荐规则一致）：
+ * 1.16 及以下 → 8；1.17-1.20.4 → 17；1.20.5+ → 21；26+ → 25。
+ */
+fun recommendedJavaFor(gameVersion: String): Int? {
+    val version = gameVersion.trim().removePrefix("v")
+    val match = Regex("^(\\d+)\\.(\\d+)(?:\\.(\\d+))?").find(version) ?: return null
+    val major = match.groupValues[1].toIntOrNull() ?: return null
+    val minor = match.groupValues[2].toIntOrNull() ?: return null
+    val patch = match.groupValues.getOrNull(3)?.toIntOrNull() ?: 0
+    if (major >= 26) return 25
+    if (major != 1) return null
+    return when {
+        minor <= 16 -> 8
+        minor <= 20 && (minor < 20 || patch <= 4) -> 17
+        else -> 21
     }
 }

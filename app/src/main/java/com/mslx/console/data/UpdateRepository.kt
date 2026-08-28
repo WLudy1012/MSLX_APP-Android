@@ -26,7 +26,15 @@ data class AppUpdateInfo(
     val forceUpdate: Boolean = false,
     /** 是否为 Actions 调试构建（来自 dev Release，不稳定，需应用内下载安装）。 */
     val actions: Boolean = false,
+    /**
+     * CNB（cnb.cool）镜像下载直链（稳定/测试渠道）。CNB 为首选更新源，
+     * 下载失败时客户端自动回退 [downloadUrl]（GitHub）。为 null 时仅使用 GitHub。
+     */
+    val cnbUrl: String? = null,
 )
+
+/** CNB Release 资产下载地址前缀（形如 .../-/releases/download/v1.5/app-release.apk）。 */
+private const val CNB_RELEASE_DOWNLOAD_BASE = "https://cnb.cool/WLudy/MSLX_APP-Android/-/releases/download"
 
 /** 单个 release 的解析结果（内部使用）。 */
 private data class ParsedRelease(
@@ -87,14 +95,19 @@ class UpdateRepository {
                 (p.force || p.release.body.orEmpty().contains("强制更新", ignoreCase = true))
         }
 
+        val apkName = newest.apk.name ?: "app-release.apk"
         return AppUpdateInfo(
             version = newest.version,
             notes = newest.release.body.orEmpty(),
             downloadUrl = newest.apk.browserDownloadUrl.orEmpty(),
-            apkName = newest.apk.name ?: "app-release.apk",
+            apkName = apkName,
             apkSize = newest.apk.size ?: 0,
             beta = newest.beta,
             forceUpdate = forceUpdate,
+            // CNB 首选：镜像仓库同名 tag 的 Release 资产（下载失败时由客户端回退 GitHub）
+            cnbUrl = newest.release.tagName
+                ?.takeIf { it.isNotBlank() }
+                ?.let { "$CNB_RELEASE_DOWNLOAD_BASE/$it/$apkName" },
         )
     }
 

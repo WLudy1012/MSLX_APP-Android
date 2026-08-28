@@ -1,0 +1,85 @@
+# CNB（cnb.cool）云构建配置：main push 构建 debug APK；v* tag 推送时构建签名 release APK 并发布 CNB Release。
+# 签名密钥通过 imports 注入（密钥仓库 keystore.yml：KEYSTORE_BASE64/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD），
+# 未配置时 tag 流水线直接失败（不发布未签名包，应用端会自动回退 GitHub 下载）。
+
+main:
+  push:
+    - docker:
+        image: mobiledevops/android-sdk-image:34.0.1
+        volumes:
+          - /root/.gradle:cow
+      stages:
+        - name: build debug apk
+          script: |
+            set -eu
+            chmod +x gradlew
+            ./gradlew assembleDebug --no-daemon --stacktrace
+        - name: list debug apk
+          script: ls -lh app/build/outputs/apk/debug
+
+$:
+  tag_push:
+    - docker:
+        image: mobiledevops/android-sdk-image:34.0.1
+        volumes:
+          - /root/.gradle:cow
+      imports:
+        # 私有密钥仓库文件（用户自建，勿公开）：内含 KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD
+        https://cnb.cool/WLudy/MSLX-secrets/-/blob/main/keystore.yml
+      stages:
+        - name: restore signing keystore
+          script: |
+            set -eu
+            if [ -z "${KEYSTORE_BASE64:-}" ]; then
+              echo "ERROR: KEYSTORE_BASE64 未配置（请在私有密钥仓库 MSLX-secrets 提供 keystore.yml）" >&2
+              exit 1
+            fi
+            mkdir -p keystore
+            echo "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > keystore/release.jks
+            cat > keystore.properties <<EOF
+            storeFile=keystore/release.jks
+            storePassword=${KEYSTORE_PASSWORD}
+            keyAlias=${KEY_ALIAS}
+            keyPassword=${KEY_PASSWORD}
+            EOF
+
+        - name: build signed release apk
+          script: |
+            set -eu
+            [ -f keystore.properties ] || { echo "ERROR: 签名配置缺失，禁止发布未签名包" >&2; exit 1; }
+            chmod +x gradlew
+            ./gradlew assembleRelease --no-daemon --stacktrace
+
+        - name: prepare release notes
+          script: |
+            set -eu
+            CUR_TAG=$(git describe --tags --exact-match 2>/dev/null || true)
+            PREV_TAG=$(git tag --list 'v*' | grep -v "^${CUR_TAG}$" | grep -ivE -- '-beta$' | sort -V | tail -1 || true)
+            {
+              echo "# MSLX_APP-Android $CUR_TAG"
+              echo ""
+              if [ -n "$PREV_TAG" ]; then
+                echo "自 $PREV_TAG 以来的提交："
+                echo ""
+                git log --pretty=format:"- %s" "$PREV_TAG..HEAD"
+              else
+                git log --pretty=format:"- %s"
+              fi
+              echo ""
+              echo "## 校验"
+              echo ""
+              echo "APK 文件：\`app-release.apk\`"
+              echo "SHA-256：\`$(sha256sum app/build/outputs/apk/release/app-release.apk | awk '{print $1}')\`"
+            } > CNB_RELEASE.md
+
+        - name: create cnb release
+          type: git:release
+          options:
+            descriptionFromFile: CNB_RELEASE.md
+            latest: true
+
+        - name: upload release apk
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - app/build/outputs/apk/release/app-release.apk
