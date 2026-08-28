@@ -1,10 +1,11 @@
 package com.mslx.console.ui.navigation
 
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -95,16 +96,22 @@ fun AppNavHost(
         else -> null
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            // 主题背景兜底：页面切换瞬间不露出窗口白底
+            .background(MaterialTheme.colorScheme.background),
+    ) {
         NavHost(
             navController = navController,
             startDestination = Routes.SPLASH,
             modifier = Modifier.weight(1f),
-            // 对称淡入淡出，避免时长不一致导致的闪烁与动画截断
-            enterTransition = { fadeIn(tween(220)) },
-            exitTransition = { fadeOut(tween(220)) },
-            popEnterTransition = { fadeIn(tween(220)) },
-            popExitTransition = { fadeOut(tween(220)) },
+            // 页面切换瞬时完成（不用淡入淡出）：交叉淡出在部分设备上会把目标页停留在透明态，
+            // 导致"整页空白只剩 Dock"；Dock 自身的选中动画保留在 MainBottomNav
+            enterTransition = { EnterTransition.None },
+            exitTransition = { ExitTransition.None },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { ExitTransition.None },
         ) {
 
             composable(Routes.SPLASH) {
