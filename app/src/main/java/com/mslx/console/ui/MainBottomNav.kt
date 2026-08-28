@@ -49,7 +49,9 @@ fun MainBottomNav(
     current: TopPage,
     onNavigate: (TopPage) -> Unit,
 ) {
-    NavigationBar {
+    // 显式限定 Dock 高度：DockItem 内使用 fillMaxHeight 填充，若不加高度上限，
+    // NavigationBar 会按子项约束把 Dock 撑满整个父容器（占满全屏）
+    NavigationBar(modifier = Modifier.height(64.dp)) {
         TopPage.entries.forEach { page ->
             DockItem(
                 page = page,
