@@ -55,9 +55,9 @@ class UpdateRepository {
         currentVersion: String,
         channel: UpdateChannel,
     ): AppUpdateInfo? {
-        // Actions 渠道：直接取 dev Release 的最新调试构建（不做版本比较，main 分支产物即"最新"）
+        // Actions 渠道：取 dev Release 的四段版本号并与当前版本比较，已是最新则不再提示
         if (channel == UpdateChannel.ACTIONS) {
-            return parseActionsRelease(releases)
+            return parseActionsRelease(releases, currentVersion)
         }
 
         // 过滤出正式(非预发布)且带 APK 资产的版本，解析 tag 的 Beta/Force 后缀
@@ -98,13 +98,20 @@ class UpdateRepository {
         )
     }
 
-    /** 解析 Actions 渠道：取 tag 为 dev 的 Release（由 android.yml 每次 main push 覆盖发布）。 */
-    private fun parseActionsRelease(releases: List<GitHubRelease>): AppUpdateInfo? {
+    /**
+     * 解析 Actions 渠道：取 tag 为 dev 的 Release（由 android.yml 每次 main push 覆盖发布）。
+     * 版本号取 Release name（如 1.3.0.28）；若其不高于当前版本（已安装同版本或更新构建）则返回 null，
+     * 避免"即使已是最新 Actions 构建仍提示更新"。
+     */
+    private fun parseActionsRelease(releases: List<GitHubRelease>, currentVersion: String): AppUpdateInfo? {
         val dev = releases.firstOrNull { it.tagName?.trim()?.equals("dev", ignoreCase = true) == true } ?: return null
         val apk = dev.assets.firstOrNull { it.name?.endsWith(".apk", ignoreCase = true) == true } ?: return null
         val url = apk.browserDownloadUrl ?: return null
+        // Release name 即四段版本号（如 1.3.0.28）；无法解析时回退 "dev" 并照常提示
+        val version = dev.name?.trim()?.takeIf { it.firstOrNull()?.isDigit() == true } ?: "dev"
+        if (version != "dev" && compareVersions(version, currentVersion) <= 0) return null
         return AppUpdateInfo(
-            version = "dev",
+            version = version,
             notes = dev.body.orEmpty(),
             downloadUrl = url,
             apkName = apk.name ?: "app-debug.apk",

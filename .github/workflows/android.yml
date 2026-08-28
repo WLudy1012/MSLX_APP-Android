@@ -119,7 +119,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: dev
-          name: "dev (Actions 调试构建)"
+          # name 放真实四段版本号（如 1.3.0.28），供客户端解析并做版本比较
+          name: "${{ env.ACTIONS_VERSION }}"
           body_path: dev_release_notes.md
           files: app/build/outputs/apk/debug/app-debug.apk
           # v2 对已存在同名 release 自动更新；overwrite_files 覆盖同名 APK 资产；

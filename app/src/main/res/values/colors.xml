@@ -1,4 +1,6 @@
 <resources>
     <color name="ic_launcher_background">#006080</color>
     <color name="window_background">#FFFFFF</color>
+    <!-- 与 Compose SplashScreen 的 BrandTeal(0xFF00838F) 一致，避免系统开屏与应用开屏之间颜色割裂 -->
+    <color name="splash_background">#00838F</color>
 </resources>

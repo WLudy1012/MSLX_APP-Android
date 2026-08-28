@@ -240,7 +240,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             repository.serverCoreClassify().fold(
                 onSuccess = { classify ->
-                    val categories = listOf(
+                    val all = listOf(
                         CoreCategory("plugins", "插件服务端", "Bukkit/Spigot/Paper", classify.pluginsCore),
                         CoreCategory("forge_hybrid", "Forge 混合", "Forge 模组 + 插件", classify.pluginsAndModsCoreForge),
                         CoreCategory("fabric_hybrid", "Fabric 混合", "Fabric 模组 + 插件", classify.pluginsAndModsCoreFabric),
@@ -250,7 +250,15 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                         CoreCategory("bedrock", "基岩版第三方", "基岩版服务端", classify.bedrockCore),
                         CoreCategory("proxy", "代理服务端", "BungeeCord/Velocity", classify.proxyCore),
                     )
-                    _state.update { it.copy(coreCategories = categories, coreSelectorLoading = false) }
+                    // 基岩版模式（mode==3）只允许选择基岩版核心
+                    val categories = if (_state.value.mode == 3) all.filter { it.key == "bedrock" } else all
+                    _state.update {
+                        it.copy(
+                            coreCategories = categories,
+                            coreSelectorLoading = false,
+                            selectedCategoryKey = if (_state.value.mode == 3) "bedrock" else _state.value.selectedCategoryKey,
+                        )
+                    }
                 },
                 onFailure = { e ->
                     _state.update { it.copy(coreSelectorLoading = false, error = "获取核心分类失败：${e.message}") }

@@ -109,7 +109,7 @@ private fun UpdateDialog(
                 }
                 Text(
                     text = when {
-                        update.actions && currentVersion.isNotBlank() -> "当前版本 v$currentVersion → Actions 最新调试构建"
+                        update.actions && currentVersion.isNotBlank() -> "当前版本 v$currentVersion → Actions v${update.version}"
                         currentVersion.isBlank() -> "更新内容："
                         else -> "当前版本 v$currentVersion → 新版本 v${update.version}"
                     },
