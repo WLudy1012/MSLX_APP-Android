@@ -21,6 +21,7 @@ class LocalServerProcess(
     private val workDir: File,
     private val minMemM: Int = 1024,
     private val maxMemM: Int = 2048,
+    private val extraArgs: List<String> = emptyList(),
 ) {
     private val _logs = Channel<String>(capacity = Channel.BUFFERED)
     val logs: Flow<String> = _logs.receiveAsFlow()
@@ -48,14 +49,15 @@ class LocalServerProcess(
             )
         }
         return runCatching {
-            val cmd = listOf(
-                javaBin.absolutePath,
-                "-Xms${minMemM}M",
-                "-Xmx${maxMemM}M",
-                "-jar",
-                serverJar.absolutePath,
-                "nogui",
-            )
+            val cmd = buildList {
+                add(javaBin.absolutePath)
+                add("-Xms${minMemM}M")
+                add("-Xmx${maxMemM}M")
+                addAll(extraArgs)
+                add("-jar")
+                add(serverJar.absolutePath)
+                add("nogui")
+            }
             val p = ProcessBuilder(cmd)
                 .directory(workDir)
                 .redirectErrorStream(true)
