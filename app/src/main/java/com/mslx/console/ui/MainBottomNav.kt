@@ -26,6 +26,9 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,9 +70,17 @@ private fun RowScope.DockItem(
     selected: Boolean,
     onNavigate: (TopPage) -> Unit,
 ) {
-    // 图标弹性缩放（选中弹跳）
+    // 按压交互源：去掉默认矩形 ripple（点击时整块 item 会闪黑框），改为图标缩放/变淡反馈
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    // 图标弹性缩放（选中弹跳，按压时轻微缩小）
     val scale by animateFloatAsState(
-        targetValue = if (selected) 1.22f else 1f,
+        targetValue = when {
+            isPressed -> 0.92f
+            selected -> 1.22f
+            else -> 1f
+        },
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMediumLow,
@@ -93,8 +104,12 @@ private fun RowScope.DockItem(
         modifier = Modifier
             .height(64.dp)
             .weight(1f)
-            // 始终回调：重按当前 tab 由外层决定行为（如重按"新建"重置表单）
-            .clickable(onClick = { onNavigate(page) }),
+            // indication=null：不绘制默认 ripple 矩形框，按压反馈走图标缩放/变淡
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = { onNavigate(page) },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -110,7 +125,7 @@ private fun RowScope.DockItem(
                 Icon(
                     imageVector = page.icon,
                     contentDescription = page.label,
-                    tint = contentColor,
+                    tint = if (isPressed) contentColor.copy(alpha = 0.6f) else contentColor,
                     modifier = Modifier
                         .size(24.dp)
                         .graphicsLayer {
