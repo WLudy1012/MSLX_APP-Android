@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
@@ -69,6 +70,7 @@ fun SettingsScreen(
     onOpenAppearance: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenLocalServer: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -206,6 +208,12 @@ fun SettingsScreen(
                         title = "关于",
                         subtitle = "版本、更新说明与贡献者",
                         onClick = onOpenAbout,
+                    )
+                    EntryRow(
+                        icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "本机开服（实验）",
+                        subtitle = "直接在本机启动服务端，需 Android JRE",
+                        onClick = onOpenLocalServer,
                     )
                 }
             }
