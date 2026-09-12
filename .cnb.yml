@@ -53,17 +53,32 @@ $:
         - name: verify embedded jre runtime
           script: |
             set -eu
-            JRE=app/src/main/assets/jre/jre17-arm64-20210825-release.tar.xz
+            JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
             SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
             [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
             echo "$SHA  $JRE" | sha256sum -c -
 
-        - name: build signed release apk
+        # 同一 Release 发布两个变体：app-release.apk（完整版，内嵌 JRE）与
+        # app-release-lite.apk（精简版，不含 JRE）；JRE 归档本身也作为附件，
+        # 供精简版在应用内下载（客户端按 CNB → GitHub 顺序尝试）。
+        - name: build signed release apk (full, embedded jre)
           script: |
             set -eu
             [ -f keystore.properties ] || { echo "ERROR: 签名配置缺失，禁止发布未签名包" >&2; exit 1; }
             chmod +x gradlew
             ./gradlew assembleRelease --no-daemon --stacktrace
+            cp app/build/outputs/apk/release/app-release.apk ./app-release.apk
+
+        - name: build signed release apk (lite, no jre)
+          script: |
+            set -eu
+            ./gradlew assembleRelease -PwithoutJre=true --no-daemon --stacktrace
+            cp app/build/outputs/apk/release/app-release.apk ./app-release-lite.apk
+            ls -lh app-release.apk app-release-lite.apk
+            unzip -l app-release.apk | grep -q 'assets/jre/' || { echo "ERROR: 完整版缺少内嵌 JRE" >&2; exit 1; }
+            if unzip -l app-release-lite.apk | grep -q 'assets/jre/'; then
+              echo "ERROR: 精简版不应包含内嵌 JRE" >&2; exit 1
+            fi
 
         - name: prepare release notes
           script: |
@@ -81,10 +96,15 @@ $:
                 git log --pretty=format:"- %s"
               fi
               echo ""
-              echo "## 校验"
               echo ""
-              echo "APK 文件：\`app-release.apk\`"
-              echo "SHA-256：\`$(sha256sum app/build/outputs/apk/release/app-release.apk | awk '{print $1}')\`"
+              echo "## 两个变体（按需选择）"
+              echo ""
+              echo "| 包 | 说明 | 大小 | SHA-256 |"
+              echo "| --- | --- | --- | --- |"
+              echo "| \`app-release.apk\` | **完整版**：内嵌 Android JRE 运行时，本机开服可离线使用 | $(du -m app-release.apk | awk '{print $1}') MB | \`$(sha256sum app-release.apk | awk '{print $1}')\` |"
+              echo "| \`app-release-lite.apk\` | **精简版**：不含运行时，体积小；本机开服首次使用需联网下载约 36MB 运行时 | $(du -m app-release-lite.apk | awk '{print $1}') MB | \`$(sha256sum app-release-lite.apk | awk '{print $1}')\` |"
+              echo ""
+              echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
             } > CNB_RELEASE.md
 
         - name: create cnb release
@@ -93,8 +113,10 @@ $:
             descriptionFromFile: CNB_RELEASE.md
             latest: true
 
-        - name: upload release apk
+        - name: upload release assets
           image: cnbcool/attachments:latest
           settings:
             attachments:
-              - app/build/outputs/apk/release/app-release.apk
+              - app-release.apk
+              - app-release-lite.apk
+              - app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz

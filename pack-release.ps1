@@ -1,14 +1,19 @@
 <#
 .SYNOPSIS
-    MSLX-Android local signed release packer.
-    Builds the release APK with the local keystore, verifies the signature,
-    copies the artifact to build\dist with a versioned name and writes a
-    .sha256 file. Prints a summary for delivery notes.
+    MSLX-Android local signed release packer (two variants in one run).
+
+.DESCRIPTION
+    Builds BOTH release variants with the local keystore and archives them:
+      * full  - app-release.apk with the embedded Android JRE runtime (offline local hosting)
+      * lite  - app-release-lite.apk without the runtime (small download, local hosting
+                downloads the ~36MB runtime on first use)
+    Each artifact is verified with apksigner, copied to build\dist with a versioned
+    name and accompanied by a .sha256 file.
 
 .EXAMPLE
     .\pack-release.ps1                       # build current versionName (from gradle)
-    .\pack-release.ps1 -VersionName 1.6.2    # override versionName via -PversionName
-    .\pack-release.ps1 -JdkHome C:\Path\jbr  # custom JDK
+    .\pack-release.ps1 -VersionName 1.6.3    # override versionName via -PversionName
+    .\pack-release.ps1 -Only full            # build a single variant
 
 .NOTES
     versionCode is NOT changed by this script - bump it in app/build.gradle.kts
@@ -19,6 +24,8 @@
 param(
     [string]$VersionName = "",
     [string]$JdkHome = "",
+    [ValidateSet("both", "full", "lite")]
+    [string]$Only = "both",
     [switch]$SkipVerify
 )
 
@@ -44,9 +51,7 @@ $SdkDir = $null
 $LocalProps = Join-Path $Root "local.properties"
 if (Test-Path $LocalProps) {
     $line = (Get-Content $LocalProps | Where-Object { $_ -match '^sdk\.dir=' } | Select-Object -First 1)
-    if ($line) {
-        $SdkDir = ($line -replace '^sdk\.dir=', '' -replace '\\:', ':')
-    }
+    if ($line) { $SdkDir = ($line -replace '^sdk\.dir=', '' -replace '\\:', ':') }
 }
 if (-not $SdkDir -or -not (Test-Path $SdkDir)) { $SdkDir = $env:LOCALAPPDATA + "\Android\Sdk" }
 $BuildTools = Join-Path $SdkDir "build-tools"
@@ -54,85 +59,115 @@ $Aapt = $null; $ApkSigner = $null
 if (Test-Path $BuildTools) {
     $latest = Get-ChildItem $BuildTools -Directory | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
     if ($latest) {
-        $Aapt = Get-ChildItem (Join-Path $latest.FullName "aapt*.exe") | Where-Object { $_.Name -like 'aapt.exe' -or $_.Name -like 'aapt2.exe' } | Select-Object -First 1
+        $Aapt = Get-ChildItem (Join-Path $latest.FullName "aapt*.exe") | Where-Object { $_.Name -eq 'aapt.exe' } | Select-Object -First 1
         $ApkSigner = Join-Path $latest.FullName "apksigner.bat"
         if (-not (Test-Path $ApkSigner)) { $ApkSigner = $null }
-        if (-not $Aapt) {
-            # aapt2 needs a "dump badging" - use aapt.exe if present else any
-            $Aapt = Get-ChildItem (Join-Path $latest.FullName "aapt*.exe") | Select-Object -First 1
-        }
+        if (-not $Aapt) { $Aapt = Get-ChildItem (Join-Path $latest.FullName "aapt*.exe") | Select-Object -First 1 }
     }
 }
 
 # ---------- Embedded JRE assets (本机开服需要) ----------
-$JreAssetDir = Join-Path $Root "app\src\main\assets\jre"
+$JreAssetDir = Join-Path $Root "app\src\jreRuntime\assets\jre"
 $HasJre = (Test-Path $JreAssetDir) -and (Get-ChildItem $JreAssetDir -Filter *.tar.xz -ErrorAction SilentlyContinue).Count -gt 0
-if (-not $HasJre) {
+if (-not $HasJre -and $Only -ne "lite") {
     Write-Host "[1.5/5] JRE assets missing, fetching ..." -ForegroundColor Yellow
     & (Join-Path $Root "fetch-jre-assets.ps1")
     if ($LASTEXITCODE -ne 0) { Write-Warning "fetch-jre-assets.ps1 failed - building without embedded JRE" }
 }
 
-# ---------- Gradle assembleRelease ----------
+# ---------- Gradle ----------
 $Gradlew = Join-Path $Root "gradlew.bat"
 if (-not (Test-Path $Gradlew)) { throw "gradlew.bat not found in $Root" }
-Write-Host "[2/5] Building assembleRelease ..." -ForegroundColor Cyan
-$GradleArgs = @(":app:assembleRelease", "--console=plain")
-if ($VersionName) { $GradleArgs += "-PversionName=$VersionName" }
-& $Gradlew @GradleArgs
-if ($LASTEXITCODE -ne 0) { throw "Gradle build failed (exit $LASTEXITCODE)." }
 
-# ---------- Locate APK & read effective versionName ----------
-$SrcApk = Join-Path $Root "app\build\outputs\apk\release\app-release.apk"
-if (-not (Test-Path $SrcApk)) { throw "APK not produced: $SrcApk" }
+function Build-Variant {
+    param([bool]$WithoutJre)
+    $label = if ($WithoutJre) { "lite (no embedded JRE)" } else { "full (embedded JRE)" }
+    Write-Host "[2/5] Building assembleRelease - $label ..." -ForegroundColor Cyan
+    $args = @(":app:assembleRelease", "--console=plain")
+    if ($VersionName) { $args += "-PversionName=$VersionName" }
+    if ($WithoutJre) { $args += "-PwithoutJre=true" }
+    & $Gradlew @args
+    if ($LASTEXITCODE -ne 0) { throw "Gradle build failed for $label (exit $LASTEXITCODE)." }
+    $apk = Join-Path $Root "app\build\outputs\apk\release\app-release.apk"
+    if (-not (Test-Path $apk)) { throw "APK not produced: $apk" }
+    return $apk
+}
 
-# APK 内容自检：本机开服依赖内嵌 JRE 与 native 桥接库（用 bsdtar 列 zip 条目，避免 .NET 程序集依赖）
-$apkEntries = tar -tf $SrcApk 2>$null
-if ($apkEntries) {
-    $jreEntry = $apkEntries | Where-Object { $_ -like "assets/jre/*.tar.xz" }
-    $soEntry = $apkEntries | Where-Object { $_ -like "lib/*/libmslxvm.so" }
-    if ($jreEntry) { Write-Host "      embedded JRE : $($jreEntry -join ', ')" -ForegroundColor DarkGray }
-    else { Write-Warning "APK 内没有 assets/jre/*.tar.xz：本机开服将只能走下载路径" }
+function Inspect-Apk {
+    param([string]$Apk, [bool]$ExpectJre)
+    $entries = tar -tf $Apk 2>$null
+    $jreEntry = $entries | Where-Object { $_ -like "assets/jre/*.tar.xz" }
+    $soEntry = $entries | Where-Object { $_ -like "lib/*/libmslxvm.so" }
+    if ($ExpectJre) {
+        if ($jreEntry) { Write-Host "      embedded JRE : $($jreEntry -join ', ')" -ForegroundColor DarkGray }
+        else { Write-Warning "APK 内没有 assets/jre/*.tar.xz：完整版缺内嵌运行时！" }
+    } elseif ($jreEntry) {
+        Write-Warning "精简版里出现了内嵌 JRE：$($jreEntry -join ', ')"
+    }
     if ($soEntry) { Write-Host "      native vm    : $($soEntry -join ', ')" -ForegroundColor DarkGray }
     else { Write-Warning "APK 内没有 lib/*/libmslxvm.so：进程内 JVM 不可用" }
 }
 
-$EffVersion = $VersionName
-if (-not $EffVersion -and $Aapt) {
-    $Badging = & $Aapt.FullName "dump" "badging" $SrcApk 2>$null
-    $EffVersion = ($Badging | Select-String "versionName='([^']*)'" | Select-Object -First 1).Matches[0].Groups[1].Value
-}
-if (-not $EffVersion) { $EffVersion = "unknown" }
-
-# ---------- Verify signature ----------
-$Signed = $false
-if ($ApkSigner -and -not $SkipVerify) {
-    Write-Host "[3/5] Verifying signature ..." -ForegroundColor Cyan
-    & $ApkSigner "verify" "--print-certs" $SrcApk
-    $Signed = ($LASTEXITCODE -eq 0)
-    if (-not $Signed) { Write-Warning "apksigner verify FAILED - APK is NOT signed with the release key." }
-} elseif ($SkipVerify) {
-    Write-Host "[3/5] Signature verification skipped (-SkipVerify)." -ForegroundColor Yellow
+function Publish-Artifact {
+    param([string]$Apk, [string]$Version, [string]$Suffix)
+    $dist = Join-Path $Root "build\dist"
+    New-Item -ItemType Directory -Force -Path $dist | Out-Null
+    $shortSha = (git -C $Root rev-parse --short HEAD 2>$null)
+    $base = "MSLX-Console-v$Version"
+    if ($shortSha) { $base += "-$shortSha" }
+    $base += "-$Suffix-signed"
+    $out = Join-Path $dist "$base.apk"
+    Copy-Item $Apk $out -Force
+    $hash = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLowerInvariant()
+    Set-Content -Path "$out.sha256" -Value "$hash  $($out | Split-Path -Leaf)" -Encoding ascii
+    Write-Host "[4/5] Copied to $out" -ForegroundColor Cyan
+    return [pscustomobject]@{ Path = $out; Sha256 = $hash; SizeMb = [math]::Round((Get-Item $out).Length / 1MB, 1) }
 }
 
-# ---------- Copy to build\dist with versioned name + sha256 ----------
-$Dist = Join-Path $Root "build\dist"
-New-Item -ItemType Directory -Force -Path $Dist | Out-Null
-$Sha = (git -C $Root rev-parse --short HEAD 2>$null)
-$Base = "MSLX-Console-v$EffVersion"
-if ($Sha) { $Base += "-$Sha" }
-$Base += "-signed"
-$OutApk = Join-Path $Dist "$Base.apk"
-Copy-Item $SrcApk $OutApk -Force
-$Hash = (Get-FileHash -Algorithm SHA256 $OutApk).Hash.ToLowerInvariant()
-Set-Content -Path "$OutApk.sha256" -Value "$Hash  $($OutApk | Split-Path -Leaf)" -Encoding ascii
-Write-Host "[4/5] Copied to $OutApk" -ForegroundColor Cyan
+# ---------- Full variant ----------
+$results = @()
+$effVersion = $VersionName
+if ($Only -ne "lite") {
+    $fullApk = Build-Variant -WithoutJre $false
+    Inspect-Apk -Apk $fullApk -ExpectJre $true
+    if (-not $effVersion -and $Aapt) {
+        $badging = & $Aapt.FullName "dump" "badging" $fullApk 2>$null
+        $effVersion = ($badging | Select-String "versionName='([^']*)'" | Select-Object -First 1).Matches[0].Groups[1].Value
+    }
+    if (-not $effVersion) { $effVersion = "unknown" }
+    if ($ApkSigner -and -not $SkipVerify) {
+        Write-Host "[3/5] Verifying signature (full) ..." -ForegroundColor Cyan
+        & $ApkSigner "verify" "--print-certs" $fullApk
+        if ($LASTEXITCODE -ne 0) { Write-Warning "apksigner verify FAILED for full APK." }
+    }
+    $results += Publish-Artifact -Apk $fullApk -Version $effVersion -Suffix "full"
+}
+
+# ---------- Lite variant ----------
+if ($Only -ne "full") {
+    $liteApk = Build-Variant -WithoutJre $true
+    Inspect-Apk -Apk $liteApk -ExpectJre $false
+    if (-not $effVersion) {
+        if ($Aapt) {
+            $badging = & $Aapt.FullName "dump" "badging" $liteApk 2>$null
+            $effVersion = ($badging | Select-String "versionName='([^']*)'" | Select-Object -First 1).Matches[0].Groups[1].Value
+        }
+        if (-not $effVersion) { $effVersion = "unknown" }
+    }
+    if ($ApkSigner -and -not $SkipVerify) {
+        Write-Host "[3/5] Verifying signature (lite) ..." -ForegroundColor Cyan
+        & $ApkSigner "verify" "--print-certs" $liteApk
+        if ($LASTEXITCODE -ne 0) { Write-Warning "apksigner verify FAILED for lite APK." }
+    }
+    $results += Publish-Artifact -Apk $liteApk -Version $effVersion -Suffix "lite"
+}
 
 # ---------- Summary ----------
 Write-Host "[5/5] DONE" -ForegroundColor Green
 Write-Host "----------------------------------------"
-Write-Host "APK      : $OutApk"
-Write-Host "Version  : $EffVersion  (versionCode from app/build.gradle.kts)"
-Write-Host "SHA-256  : $Hash"
-Write-Host "Signed   : $Signed"
+foreach ($r in $results) {
+    Write-Host ("APK      : {0}  ({1} MB)" -f $r.Path, $r.SizeMb)
+    Write-Host ("SHA-256  : {0}" -f $r.Sha256)
+}
+Write-Host "Version  : $effVersion  (versionCode from app/build.gradle.kts)"
 Write-Host "----------------------------------------"

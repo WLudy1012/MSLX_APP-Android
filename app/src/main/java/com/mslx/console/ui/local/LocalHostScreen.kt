@@ -159,6 +159,17 @@ fun LocalHostScreen(
                     state.jreInfo?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
+                    if (!state.jreEmbedded) {
+                        Text(
+                            "⚠ 此安装包未内嵌 JRE（精简版）：点「安装 JRE」会联网下载约 36MB 运行时（CNB 优先、GitHub 回退）；" +
+                                "想要离线开服请在更新弹窗里选「完整版」。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    state.jreError?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
                     Text(
                         "运行时来自 PojavLauncher 的 Android OpenJDK 构建（固定 SHA-256 校验）。" +
                             "安卓 10+ 禁止应用 exec 自己的数据目录，故 JVM 由 native 层在进程内创建，不再使用 bin/java。",
@@ -168,7 +179,7 @@ fun LocalHostScreen(
                     if (state.jreInstalling) {
                         LinearProgressIndicator(progress = { state.jreProgress }, modifier = Modifier.fillMaxWidth())
                         Text(
-                            "正在安装 JRE… ${(state.jreProgress * 100).toInt()}%",
+                            "正在安装 JRE… ${(state.jreProgress * 100).toInt()}%（解压约 30–90 秒，请勿退出页面）",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

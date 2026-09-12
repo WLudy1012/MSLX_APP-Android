@@ -23,7 +23,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
-$Dest = Join-Path $Root "app\src\main\assets\jre"
+$Dest = Join-Path $Root "app\src\jreRuntime\assets\jre"
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 
 $Base = "https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ec28559"

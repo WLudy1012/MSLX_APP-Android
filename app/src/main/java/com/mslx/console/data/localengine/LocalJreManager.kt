@@ -37,23 +37,42 @@ object LocalJreManager {
     private const val UPSTREAM_BASE =
         "https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ec28559"
 
-    /** 某个 ABI 对应的运行时归档：assets 内嵌名 / 预设下载地址 / 固定 SHA-256。 */
+    /**
+     * CNB 镜像前缀（国内直连更快）：JRE 归档会随 Release 一起挂载（见 CI 配置），
+     * 下载顺序 CNB 首选 → 上游 GitHub 回退。发新版本时同步更新这里的 tag。
+     */
+    private const val CNB_JRE_MIRROR_BASE =
+        "https://cnb.cool/WLudy/MSLX_APP-Android/-/releases/download/v1.6.3-Beta"
+
+    /** 某个 ABI 对应的运行时归档：assets 内嵌名 / 下载源（按序尝试）/ 固定 SHA-256。 */
     data class RuntimeSpec(
         val assetName: String,
         val url: String,
         val sha256: String,
-    )
+        val mirrors: List<String> = emptyList(),
+    ) {
+        /** 实际尝试的下载源顺序。 */
+        val sources: List<String> get() = mirrors.ifEmpty { listOf(url) }
+    }
 
     val ARM64 = RuntimeSpec(
         assetName = "jre17-arm64-20210825-release.tar.xz",
         url = "$UPSTREAM_BASE/jre17-arm64-20210825-release.tar.xz",
         sha256 = "c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d",
+        mirrors = listOf(
+            "$CNB_JRE_MIRROR_BASE/jre17-arm64-20210825-release.tar.xz",
+            "$UPSTREAM_BASE/jre17-arm64-20210825-release.tar.xz",
+        ),
     )
 
     val X86_64 = RuntimeSpec(
         assetName = "jre17-x86_64-20210825-release.tar.xz",
         url = "$UPSTREAM_BASE/jre17-x86_64-20210825-release.tar.xz",
         sha256 = "ebbdf75ab864a83671a108032c30e67174f79cc19596cfc1d7bfb71be26b6e71",
+        mirrors = listOf(
+            "$CNB_JRE_MIRROR_BASE/jre17-x86_64-20210825-release.tar.xz",
+            "$UPSTREAM_BASE/jre17-x86_64-20210825-release.tar.xz",
+        ),
     )
 
     fun specForAbi(abi: String): RuntimeSpec? = when (abi) {
@@ -113,13 +132,32 @@ object LocalJreManager {
                     AppLogger.i("LocalJre", "从内嵌 assets 安装 JRE：${spec.assetName}")
                     extractAndVerify(embedded.first, embedded.second, spec, home, onProgress)
                 } else {
-                    AppLogger.i("LocalJre", "assets 未内嵌该 ABI，改为下载：${spec.url}")
+                    // 未内嵌该 ABI：按 CNB → GitHub 顺序尝试下载（任一源失败自动换下一个）
                     val tmp = File(context.cacheDir, spec.assetName)
-                    try {
-                        LocalDownloader.download(spec.url, tmp, spec.sha256) { onProgress(it * 0.5f) }
-                        extractAndVerify({ FileInputStream(tmp) }, tmp.length(), spec, home, onProgress)
-                    } finally {
-                        tmp.delete()
+                    var lastError: Throwable? = null
+                    var done = false
+                    for (url in spec.sources) {
+                        try {
+                            AppLogger.i("LocalJre", "下载 JRE 运行时：$url")
+                            LocalDownloader.download(url, tmp, spec.sha256) { onProgress(it * 0.5f) }
+                            onProgress(0.5f)
+                            extractAndVerify({ FileInputStream(tmp) }, tmp.length(), spec, home) { p ->
+                                onProgress(0.5f + p * 0.5f)
+                            }
+                            done = true
+                            break
+                        } catch (e: Exception) {
+                            lastError = e
+                            AppLogger.w("LocalJre", "JRE 下载源失败，尝试下一个：$url", e)
+                            tmp.delete()
+                        }
+                    }
+                    tmp.delete()
+                    if (!done) {
+                        throw IllegalStateException(
+                            "所有下载源均失败（最后一次：${lastError?.message ?: "未知错误"}）",
+                            lastError,
+                        )
                     }
                 }
                 if (!isInstalled(context)) {
@@ -192,6 +230,17 @@ object LocalJreManager {
 
         private fun report() {
             if (total > 0) onProgress((read.toFloat() / total).coerceIn(0f, 1f))
+        }
+
+        /** 必须透传：InputStream 默认返回 0，部分解压实现会据此误判流已结束。 */
+        override fun available(): Int = delegate.available()
+
+        /** skip 一律走 read，保证 SHA-256 与进度统计不漏字节。 */
+        override fun skip(n: Long): Long {
+            if (n <= 0) return 0
+            val buf = ByteArray(minOf(n, 64 * 1024).toInt().coerceAtLeast(1))
+            val r = read(buf, 0, buf.size)
+            return if (r < 0) 0 else r.toLong()
         }
 
         override fun close() = delegate.close()

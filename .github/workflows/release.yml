@@ -36,7 +36,7 @@ jobs:
       - name: Verify embedded JRE runtime
         run: |
           set -e
-          JRE=app/src/main/assets/jre/jre17-arm64-20210825-release.tar.xz
+          JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
           SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
           if [ ! -f "$JRE" ]; then
             echo "::error::缺少内嵌 JRE 归档 $JRE（本机开服的运行时）"
@@ -80,10 +80,27 @@ jobs:
           keyPassword=$KEY_PASSWORD
           EOF
 
-      - name: Build signed release APK
+      # 同一 Release 发布两个变体：
+      #   app-release.apk      完整版（内嵌 JRE 运行时，可离线开服）
+      #   app-release-lite.apk 精简版（不含运行时，体积小；本机开服首次使用需联网下载运行时）
+      # 并把 JRE 归档本身作为资产挂上，供精简版在应用内下载（客户端按 CNB → GitHub 顺序尝试）。
+      - name: Build signed release APK (full, embedded JRE)
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk ./app-release.apk
+
+      - name: Build signed release APK (lite, no JRE)
+        run: |
+          ./gradlew assembleRelease -PwithoutJre=true --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk ./app-release-lite.apk
+          ls -lh app-release.apk app-release-lite.apk
+          # 自检：完整版必须含内嵌 JRE，精简版必须不含
+          unzip -l app-release.apk | grep -q 'assets/jre/' || { echo "::error::完整版缺少内嵌 JRE"; exit 1; }
+          if unzip -l app-release-lite.apk | grep -q 'assets/jre/'; then
+            echo "::error::精简版不应包含内嵌 JRE"
+            exit 1
+          fi
 
       # 生成 release notes：取"上一版"并列出其到本版的全部提交。
       # 层级规则（正式版 x.x / Beta x.x.x / Actions x.x.x.x）：
@@ -118,25 +135,36 @@ jobs:
             echo ""
           } > release_notes.md
 
-      # 计算 APK SHA256 并写入 release notes，供用户校验文件完整性
+      # 计算两个变体的 SHA256 并写入 release notes，供用户校验文件完整性
       - name: Compute APK SHA256
         run: |
-          SHA=$(sha256sum app/build/outputs/apk/release/app-release.apk | awk '{print $1}')
+          FULL_SHA=$(sha256sum app-release.apk | awk '{print $1}')
+          LITE_SHA=$(sha256sum app-release-lite.apk | awk '{print $1}')
+          FULL_MB=$(awk "BEGIN{printf \"%.1f\", $(stat -c%s app-release.apk)/1048576}")
+          LITE_MB=$(awk "BEGIN{printf \"%.1f\", $(stat -c%s app-release-lite.apk)/1048576}")
           {
             echo ""
-            echo "## 校验"
+            echo "## 两个变体（按需选择）"
             echo ""
-            echo "APK 文件：\`app-release.apk\`"
-            echo "SHA-256：\`$SHA\`"
+            echo "| 包 | 说明 | 大小 | SHA-256 |"
+            echo "| --- | --- | --- | --- |"
+            echo "| \`app-release.apk\` | **完整版**：内嵌 Android JRE 运行时，本机开服可离线使用 | ${FULL_MB} MB | \`$FULL_SHA\` |"
+            echo "| \`app-release-lite.apk\` | **精简版**：不含运行时，体积小；本机开服首次使用需联网下载约 36MB 运行时 | ${LITE_MB} MB | \`$LITE_SHA\` |"
+            echo ""
+            echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
             echo ""
             echo "校验命令（Windows PowerShell）："
             echo "\`\`\`powershell"
             echo "Get-FileHash app-release.apk -Algorithm SHA256"
+            echo "Get-FileHash app-release-lite.apk -Algorithm SHA256"
             echo "\`\`\`"
           } >> release_notes.md
 
-      - name: Upload APK to release
+      - name: Upload APKs to release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/app-release.apk
+          files: |
+            app-release.apk
+            app-release-lite.apk
+            app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
           body_path: release_notes.md

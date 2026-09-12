@@ -1,6 +1,7 @@
 package com.mslx.console.ui.update
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,12 +18,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.AppUpdateInfo
+import com.mslx.console.data.localengine.LocalJreManager
 
 /**
  * 全局更新弹窗宿主：挂载在导航根节点外层。
@@ -43,12 +48,17 @@ fun UpdateHost(
 
     val update = state.update
     if (update != null) {
+        val context = LocalContext.current
+        // 当前安装包是否自带内嵌 JRE（决定推荐完整版还是精简版）
+        val currentHasEmbeddedJre = remember(context) { LocalJreManager.hasEmbeddedAsset(context) }
         UpdateDialog(
             currentVersion = state.currentVersion,
             update = update,
+            currentHasEmbeddedJre = currentHasEmbeddedJre,
             downloading = state.downloadingActions,
             downloadProgress = state.downloadProgress,
             onInstall = { viewModel.downloadAndInstall() },
+            onInstallLite = { viewModel.downloadAndInstall(lite = true) },
             onSkip = { viewModel.skip() },
         )
     }
@@ -58,9 +68,11 @@ fun UpdateHost(
 private fun UpdateDialog(
     currentVersion: String,
     update: AppUpdateInfo,
+    currentHasEmbeddedJre: Boolean,
     downloading: Boolean,
     downloadProgress: Float,
     onInstall: () -> Unit,
+    onInstallLite: () -> Unit,
     onSkip: () -> Unit,
 ) {
     AlertDialog(
@@ -123,10 +135,39 @@ private fun UpdateDialog(
                 )
                 if (update.apkSize > 0) {
                     Text(
-                        text = "APK 大小：${formatSize(update.apkSize)}",
+                        text = "APK 大小：${formatSize(update.apkSize)}" +
+                            if (update.hasLiteVariant) "（完整版）" else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                // 带 / 不带内嵌 JRE 的版本提示（同一 Release 同时提供两个包）
+                Spacer(Modifier.height(4.dp))
+                if (update.embeddedJre) {
+                    Text(
+                        text = "✓ 完整版内嵌 JRE 运行时：本机开服可直接离线开服，无需下载运行时。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Text(
+                        text = "⚠ 该包未内嵌 JRE 运行时：本机开服首次使用需联网下载约 36MB 运行时。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (!currentHasEmbeddedJre && update.hasLiteVariant) {
+                    Text(
+                        text = "当前安装的是精简版：如需离线开服请选择完整版（体积约 ${formatSize(update.apkSize)}）；只用守护进程功能可选精简版（约 ${formatSize(update.liteSize)}）。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (update.hasLiteVariant) {
+                    Text(
+                        text = "同一版本提供两种包：完整版 ${formatSize(update.apkSize)}（含 JRE）/ 精简版 ${formatSize(update.liteSize)}（不含 JRE，本机开服需联网下载运行时）。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 if (downloading) {
@@ -144,18 +185,29 @@ private fun UpdateDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = onInstall,
-                enabled = !downloading,
-            ) {
-                Text(
-                    text = when {
-                        downloading -> "下载中…"
-                        update.forceUpdate -> "立即下载并安装"
-                        else -> "下载并安装"
-                    },
-                    color = MaterialTheme.colorScheme.primary,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (update.hasLiteVariant && !downloading) {
+                    TextButton(onClick = onInstallLite) {
+                        Text(
+                            text = "精简版 ${formatSize(update.liteSize)}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = onInstall,
+                    enabled = !downloading,
+                ) {
+                    Text(
+                        text = when {
+                            downloading -> "下载中…"
+                            update.forceUpdate -> "立即下载并安装"
+                            update.hasLiteVariant -> "完整版 ${formatSize(update.apkSize)}"
+                            else -> "下载并安装"
+                        },
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         },
         dismissButton = {

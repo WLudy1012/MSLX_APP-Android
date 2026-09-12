@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +51,11 @@ fun LogViewerScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     // 只渲染末尾 200K 字符，避免单个 Text 渲染 1MB 日志造成卡顿；复制/导出仍用全文
     val displayLogs = logs.takeLast(200_000)
+    // 打开日志时自动滚到最后一行（最新日志在末尾，用户通常就是想看最新的）
+    val scrollState = rememberScrollState()
+    LaunchedEffect(scrollState.maxValue, displayLogs) {
+        if (scrollState.maxValue > 0) scrollState.scrollTo(scrollState.maxValue)
+    }
 
     Scaffold(
         topBar = {
@@ -109,7 +115,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(scrollState),
             )
         }
     }

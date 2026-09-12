@@ -31,10 +31,31 @@ data class AppUpdateInfo(
      * 下载失败时客户端自动回退 [downloadUrl]（GitHub）。为 null 时仅使用 GitHub。
      */
     val cnbUrl: String? = null,
-)
+    /**
+     * 精简版 APK（**不含**内嵌 JRE 运行时，体积小）直链；为 null 表示该 Release 只提供完整版。
+     * 同一个 Release 会同时挂载完整版与精简版两个包（见 CI 配置）。
+     */
+    val liteUrl: String? = null,
+    /** 精简版 APK 大小（字节）。 */
+    val liteSize: Long = 0,
+    /** 精简版 CNB 镜像直链。 */
+    val liteCnbUrl: String? = null,
+    /** 该更新包是否内嵌 JRE 运行时（本机开服可离线使用），按体积判定。 */
+    val embeddedJre: Boolean = false,
+) {
+    /** 该 Release 是否同时提供精简版。 */
+    val hasLiteVariant: Boolean get() = !liteUrl.isNullOrBlank()
+}
 
 /** CNB Release 资产下载地址前缀（形如 .../-/releases/download/v1.5/app-release.apk）。 */
 private const val CNB_RELEASE_DOWNLOAD_BASE = "https://cnb.cool/WLudy/MSLX_APP-Android/-/releases/download"
+
+/** 内嵌 JRE 运行时的包体积下限（arm64 运行时约 36MB，远大于无 JRE 的 ~10MB）。 */
+private const val EMBEDDED_JRE_MIN_BYTES = 30L * 1024 * 1024
+
+/** 完整版 / 精简版资产名（CI 固定命名，见 .github/workflows/release.yml 与 .cnb.yml）。 */
+private const val APK_FULL_NAME = "app-release.apk"
+private const val APK_LITE_NAME = "app-release-lite.apk"
 
 /** 单个 release 的解析结果（内部使用）。 */
 private data class ParsedRelease(
@@ -43,6 +64,7 @@ private data class ParsedRelease(
     val force: Boolean,
     val release: GitHubRelease,
     val apk: com.mslx.console.data.remote.GitHubReleaseAsset,
+    val lite: com.mslx.console.data.remote.GitHubReleaseAsset? = null,
 )
 
 /**
@@ -72,9 +94,10 @@ class UpdateRepository {
         val parsed = releases
             .filter { !it.prerelease }
             .mapNotNull { release -> parseTag(release.tagName)?.let { p ->
-                val apk = release.assets.firstOrNull { it.name?.endsWith(".apk", ignoreCase = true) == true }
-                val url = apk?.browserDownloadUrl
-                if (url.isNullOrBlank()) null else ParsedRelease(p.version, p.beta, p.force, release, apk)
+                val (full, lite) = pickApkAssets(release)
+                val url = full?.browserDownloadUrl
+                if (full == null || url.isNullOrBlank()) null
+                else ParsedRelease(p.version, p.beta, p.force, release, full, lite)
             } }
 
         // 渠道过滤：稳定渠道只出稳定版；测试渠道稳定+测试都出
@@ -95,7 +118,9 @@ class UpdateRepository {
                 (p.force || p.release.body.orEmpty().contains("强制更新", ignoreCase = true))
         }
 
-        val apkName = newest.apk.name ?: "app-release.apk"
+        val apkName = newest.apk.name ?: APK_FULL_NAME
+        val tag = newest.release.tagName?.takeIf { it.isNotBlank() }
+        val lite = newest.lite
         return AppUpdateInfo(
             version = newest.version,
             notes = newest.release.body.orEmpty(),
@@ -104,11 +129,32 @@ class UpdateRepository {
             apkSize = newest.apk.size ?: 0,
             beta = newest.beta,
             forceUpdate = forceUpdate,
+            embeddedJre = (newest.apk.size ?: 0) >= EMBEDDED_JRE_MIN_BYTES,
             // CNB 首选：镜像仓库同名 tag 的 Release 资产（下载失败时由客户端回退 GitHub）
-            cnbUrl = newest.release.tagName
-                ?.takeIf { it.isNotBlank() }
-                ?.let { "$CNB_RELEASE_DOWNLOAD_BASE/$it/$apkName" },
+            cnbUrl = tag?.let { "$CNB_RELEASE_DOWNLOAD_BASE/$it/$apkName" },
+            liteUrl = lite?.browserDownloadUrl,
+            liteSize = lite?.size ?: 0,
+            liteCnbUrl = if (lite != null && tag != null) {
+                "$CNB_RELEASE_DOWNLOAD_BASE/$tag/${lite.name}"
+            } else {
+                null
+            },
         )
+    }
+
+    /**
+     * 从 release 资产里挑出「完整版（含内嵌 JRE）」与「精简版（不含 JRE）」。
+     * 命名不匹配时回退：把最大的 APK 当完整版，其余非同名 APK 视为候选精简版。
+     */
+    private fun pickApkAssets(
+        release: GitHubRelease,
+    ): Pair<com.mslx.console.data.remote.GitHubReleaseAsset?, com.mslx.console.data.remote.GitHubReleaseAsset?> {
+        val apks = release.assets.filter { it.name?.endsWith(".apk", ignoreCase = true) == true }
+        if (apks.isEmpty()) return null to null
+        val lite = apks.firstOrNull { it.name.equals(APK_LITE_NAME, ignoreCase = true) }
+        val full = apks.firstOrNull { it.name.equals(APK_FULL_NAME, ignoreCase = true) }
+            ?: apks.filter { it !== lite }.maxByOrNull { it.size ?: 0 }
+        return full to lite
     }
 
     /**

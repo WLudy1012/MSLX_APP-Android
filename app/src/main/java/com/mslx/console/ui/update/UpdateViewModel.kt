@@ -155,11 +155,17 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 应用内下载 APK 并拉起系统安装器（稳定版/测试版/Actions 全部走此路径）。
      * 下载源顺序：CNB 镜像首选 → GitHub 回退（任一源失败自动尝试下一个）。
+     * [lite] = true 时下载**不含内嵌 JRE** 的精简版（体积小，本机开服需联网下载运行时）。
      */
-    fun downloadAndInstall() {
+    fun downloadAndInstall(lite: Boolean = false) {
         val update = _state.value.update ?: return
         if (_state.value.downloadingActions) return
-        val candidates = listOfNotNull(update.cnbUrl?.takeIf { it.isNotBlank() }, update.downloadUrl)
+        val sources = if (lite && update.hasLiteVariant) {
+            listOfNotNull(update.liteCnbUrl?.takeIf { it.isNotBlank() }, update.liteUrl)
+        } else {
+            listOfNotNull(update.cnbUrl?.takeIf { it.isNotBlank() }, update.downloadUrl)
+        }
+        val candidates = sources
             .mapNotNull { url ->
                 val uri = Uri.parse(url)
                 val host = uri.host?.lowercase()

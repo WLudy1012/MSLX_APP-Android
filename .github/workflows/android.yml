@@ -36,7 +36,7 @@ jobs:
       - name: Verify embedded JRE runtime
         run: |
           set -e
-          JRE=app/src/main/assets/jre/jre17-arm64-20210825-release.tar.xz
+          JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
           SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
           if [ ! -f "$JRE" ]; then
             echo "::error::缺少内嵌 JRE 归档 $JRE（本机开服的运行时）"

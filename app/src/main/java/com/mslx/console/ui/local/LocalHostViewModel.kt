@@ -25,6 +25,8 @@ data class LocalHostUiState(
     val jreAbi: String = "",
     val jreInstalling: Boolean = false,
     val jreProgress: Float = 0f,
+    /** JRE 安装失败原因（在 JRE 卡片内直接显示，避免用户看不到页面底部的提示）。 */
+    val jreError: String? = null,
     val javaMajor: Int = LocalJreManager.JAVA_MAJOR,
     // 核心（MSLAPI）
     val coreNames: List<String> = emptyList(),
@@ -135,18 +137,28 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
     /** 安装 JRE：优先 APK 内嵌归档，缺失时按预设地址下载（都做 SHA-256 校验）。 */
     fun installJre() {
         if (_state.value.jreInstalling) return
-        _state.update { it.copy(jreInstalling = true, jreProgress = 0f, message = null) }
+        _state.update { it.copy(jreInstalling = true, jreProgress = 0f, jreError = null, message = null) }
+        AppLogger.i(
+            "LocalHost",
+            "开始安装 JRE：abi=${LocalJreManager.currentAbi()}，内嵌=${_state.value.jreEmbedded}",
+        )
         viewModelScope.launch {
             LocalJreManager.install(getApplication()) { p ->
                 _state.update { it.copy(jreProgress = p) }
             }
                 .onSuccess {
                     AppLogger.i("LocalHost", "JRE 安装成功")
-                    _state.update { it.copy(jreInstalling = false, message = "JRE 安装完成") }
+                    _state.update { it.copy(jreInstalling = false, jreError = null, message = "JRE 安装完成") }
                 }
                 .onFailure { e ->
                     AppLogger.e("LocalHost", "JRE 安装失败", e)
-                    _state.update { it.copy(jreInstalling = false, message = "JRE 安装失败：${e.message}") }
+                    _state.update {
+                        it.copy(
+                            jreInstalling = false,
+                            jreError = "JRE 安装失败：${e.message ?: e::class.java.simpleName}",
+                            message = null,
+                        )
+                    }
                 }
             refreshJre()
         }

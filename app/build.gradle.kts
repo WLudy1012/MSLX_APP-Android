@@ -23,9 +23,9 @@ android {
         applicationId = "com.mslx.console"
         minSdk = 24
         targetSdk = 35
-        versionCode = 28
+        versionCode = 29
         // CI Actions 构建会以 -PversionName=x.x.x.x 覆盖（见 android.yml Compute Actions version）
-        versionName = (project.findProperty("versionName") as String?) ?: "1.6.2"
+        versionName = (project.findProperty("versionName") as String?) ?: "1.6.3"
 
         ndk {
             // arm64 真机 + x86_64 模拟器（本机开服调试用）
@@ -93,6 +93,17 @@ android {
     androidResources {
         // 内嵌 JRE 是 .tar.xz，再压缩没有收益，跳过以加快打包
         noCompress += "xz"
+    }
+
+    // 内嵌 JRE 运行时放在独立源集：默认打进 APK（完整版）；
+    // 传 -PwithoutJre=true 即产出不含运行时的精简版（CI 同一 Release 发布两个包）。
+    sourceSets {
+        getByName("main") {
+            assets.srcDirs("src/main/assets")
+            if (project.findProperty("withoutJre") != "true") {
+                assets.srcDirs("src/jreRuntime/assets")
+            }
+        }
     }
 }
 
