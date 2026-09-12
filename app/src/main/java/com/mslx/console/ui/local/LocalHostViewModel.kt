@@ -166,6 +166,9 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
         val extraArgs = s.jvmArgs.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        // 手工放置的 java 可能没有可执行位，启动前补一次 chmod（失败不阻断，交给进程自己报错）
+        runCatching { File(s.javaPath).setExecutable(true, false) }
+            .onFailure { AppLogger.w("LocalHost", "设置 java 可执行位失败: ${s.javaPath}", it) }
         val workDir = File(worldsDir, s.serverName.replace(Regex("[^A-Za-z0-9._-]"), "_"))
         val engine = LocalServerProcess(
             javaBin = File(s.javaPath),

@@ -61,8 +61,13 @@ object LocalDownloader {
  */
 object LocalJreManager {
 
+    /**
+     * JRE 必须落在 **应用私有 filesDir**（不能用 getExternalFilesDir）：
+     * Android 10+ 把 /storage/emulated 挂载为 noexec，从外部存储 exec java 必然失败；
+     * 只有私有 data 分区允许执行解压出来的二进制（PojavLauncher 同做法）。
+     */
     fun jreRoot(context: android.content.Context): File =
-        File(context.getExternalFilesDir(null) ?: context.filesDir, "jre")
+        File(context.filesDir, "jre")
 
     fun installedJava(context: android.content.Context): File =
         File(jreRoot(context), "bin/java")
@@ -83,6 +88,8 @@ object LocalJreManager {
                 root.mkdirs()
                 extractZip(tmp, root)
                 tmp.delete()
+                // zip 解压不保留可执行位，Android 上必须显式 chmod，否则 exec java 报 Permission denied
+                root.walkTopDown().filter { it.isFile }.forEach { it.setExecutable(true, false) }
             }
             val java = installedJava(context)
             if (!java.isFile) throw IllegalStateException("归档内未找到 bin/java，请确认是 Android JRE zip")
