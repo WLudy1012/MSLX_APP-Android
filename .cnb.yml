@@ -9,6 +9,13 @@ main:
         volumes:
           - /root/.gradle:cow
       stages:
+        - name: verify embedded jre runtime
+          script: |
+            set -eu
+            JRE=app/src/main/assets/jre/jre17-arm64-20210825-release.tar.xz
+            SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
+            [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
+            echo "$SHA  $JRE" | sha256sum -c -
         - name: build debug apk
           script: |
             set -eu
@@ -42,6 +49,14 @@ $:
             keyAlias=${KEY_ALIAS}
             keyPassword=${KEY_PASSWORD}
             EOF
+
+        - name: verify embedded jre runtime
+          script: |
+            set -eu
+            JRE=app/src/main/assets/jre/jre17-arm64-20210825-release.tar.xz
+            SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
+            [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
+            echo "$SHA  $JRE" | sha256sum -c -
 
         - name: build signed release apk
           script: |

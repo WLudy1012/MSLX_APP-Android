@@ -32,6 +32,18 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # 本机开服需要内嵌 JRE：归档缺失会让 dev 构建的调试包装不上运行时
+      - name: Verify embedded JRE runtime
+        run: |
+          set -e
+          JRE=app/src/main/assets/jre/jre17-arm64-20210825-release.tar.xz
+          SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
+          if [ ! -f "$JRE" ]; then
+            echo "::error::缺少内嵌 JRE 归档 $JRE（本机开服的运行时）"
+            exit 1
+          fi
+          echo "$SHA  $JRE" | sha256sum -c -
+
       # 仅 main push 时恢复正式签名密钥：debug 构建用 release 签名，
       # 产出的 Actions 调试 APK 可直接覆盖安装正式版（PR 无 Secrets，走默认 debug 签名）。
       - name: Restore signing keystore (main only)

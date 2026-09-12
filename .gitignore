@@ -15,7 +15,8 @@ keystore.properties
 *.keystore
 # 本地发布/Actions 配置说明（含密钥，切勿提交）
 ACTIONS_GUIDE.md
-# 内嵌 Android JRE 运行时（36MB+/ABI，不入库；用 fetch-jre-assets.ps1 获取）
-/app/src/main/assets/jre/
+# 内嵌 Android JRE：**arm64 归档要入库**（CI 构建需内嵌运行时，见 llm.txt 第 41 节）；
+# x86_64 归档不入库，用 fetch-jre-assets.ps1 -IncludeX86_64 获取
+/app/src/main/assets/jre/jre17-x86_64-*
 # 本地归档产物
 /build/dist/
