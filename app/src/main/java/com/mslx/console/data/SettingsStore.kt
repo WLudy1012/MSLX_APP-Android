@@ -3,6 +3,7 @@ package com.mslx.console.data
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -30,7 +31,7 @@ enum class ThemeMode { DYNAMIC, SEED }
 /** 更新渠道：稳定版(默认) / 测试版(Beta) / Actions 调试构建。 */
 enum class UpdateChannel { STABLE, BETA, ACTIONS }
 
-/** 应用全局设置(主题 + 多 Daemon + 更新渠道 + 引导状态)。 */
+/** 应用全局设置(主题 + 多 Daemon + 更新渠道 + 引导状态 + 本机开服默认值)。 */
 data class AppSettings(
     val daemons: List<DaemonConfig> = emptyList(),
     val activeDaemonId: String? = null,
@@ -39,6 +40,12 @@ data class AppSettings(
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val onboarded: Boolean = false,
     val disclaimerAccepted: Boolean = false,
+    // 本机开服默认参数（本地页可临时覆盖）
+    val localMinMemMb: Int = 1024,
+    val localMaxMemMb: Int = 2048,
+    val localJvmArgs: String = "",
+    val localKeepAlive: Boolean = true,
+    val localUseSerialGc: Boolean = true,
 ) {
     val activeDaemon: DaemonConfig?
         get() = daemons.firstOrNull { it.id == activeDaemonId }
@@ -59,6 +66,11 @@ class SettingsStore(private val context: Context) {
         val ONBOARDED = booleanPreferencesKey("onboarded")
         val DISCLAIMER_ACCEPTED = booleanPreferencesKey("disclaimer_accepted")
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
+        val LOCAL_MIN_MEM = intPreferencesKey("local_min_mem")
+        val LOCAL_MAX_MEM = intPreferencesKey("local_max_mem")
+        val LOCAL_JVM_ARGS = stringPreferencesKey("local_jvm_args")
+        val LOCAL_KEEP_ALIVE = booleanPreferencesKey("local_keep_alive")
+        val LOCAL_USE_SERIAL_GC = booleanPreferencesKey("local_use_serial_gc")
     }
 
     val settingsFlow: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
@@ -74,6 +86,11 @@ class SettingsStore(private val context: Context) {
             },
             onboarded = prefs[Keys.ONBOARDED] ?: false,
             disclaimerAccepted = prefs[Keys.DISCLAIMER_ACCEPTED] ?: false,
+            localMinMemMb = prefs[Keys.LOCAL_MIN_MEM] ?: 1024,
+            localMaxMemMb = prefs[Keys.LOCAL_MAX_MEM] ?: 2048,
+            localJvmArgs = prefs[Keys.LOCAL_JVM_ARGS].orEmpty(),
+            localKeepAlive = prefs[Keys.LOCAL_KEEP_ALIVE] ?: true,
+            localUseSerialGc = prefs[Keys.LOCAL_USE_SERIAL_GC] ?: true,
         )
     }
 
@@ -91,6 +108,11 @@ class SettingsStore(private val context: Context) {
                 UpdateChannel.ACTIONS -> "actions"
                 UpdateChannel.STABLE -> "stable"
             }
+            prefs[Keys.LOCAL_MIN_MEM] = next.localMinMemMb
+            prefs[Keys.LOCAL_MAX_MEM] = next.localMaxMemMb
+            prefs[Keys.LOCAL_JVM_ARGS] = next.localJvmArgs
+            prefs[Keys.LOCAL_KEEP_ALIVE] = next.localKeepAlive
+            prefs[Keys.LOCAL_USE_SERIAL_GC] = next.localUseSerialGc
         }
     }
 
@@ -118,6 +140,23 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setUpdateChannel(channel: UpdateChannel) =
         update { it.copy(updateChannel = channel) }
+
+    /** 保存本机开服的默认性能参数。 */
+    suspend fun setLocalServer(
+        minMemMb: Int,
+        maxMemMb: Int,
+        jvmArgs: String,
+        keepAlive: Boolean,
+        useSerialGc: Boolean,
+    ) = update {
+        it.copy(
+            localMinMemMb = minMemMb,
+            localMaxMemMb = maxMemMb,
+            localJvmArgs = jvmArgs,
+            localKeepAlive = keepAlive,
+            localUseSerialGc = useSerialGc,
+        )
+    }
 
     suspend fun markOnboarded() = update { it.copy(onboarded = true) }
 

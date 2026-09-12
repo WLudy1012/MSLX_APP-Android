@@ -1,5 +1,14 @@
 package com.mslx.console.ui.local
 
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Process
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -32,6 +42,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,8 +51,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.ui.theme.ConsoleBackground
@@ -51,8 +64,8 @@ import com.mslx.console.ui.theme.ConsoleTextStyle
 
 /**
  * 本机开服（进程内 JVM）：内嵌 PojavLauncher 的 Android JRE + MSLAPI 服务端核心，
- * 用 native dlopen(libjvm.so) + JNI_CreateJavaVM 在 App 进程内起服。
- * 不依赖 Termux、不依赖守护进程、不需要 root。
+ * 用 native dlopen(libjvm.so) + JNI_CreateJavaVM 在 App 进程内起服；
+ * 由前台服务（常驻通知）保活，退到后台 / 划掉最近任务也不掉线。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,6 +74,43 @@ fun LocalHostScreen(
     viewModel: LocalHostViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    // Android 13+ 通知权限：即使被拒也只是通知不可见，前台服务照常运行
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { viewModel.start() }
+
+    val onStartClick: () -> Unit = {
+        val needPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        if (needPermission) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) else viewModel.start()
+    }
+
+    // 服务端停止后提示「需完全退出 App 才能再次开服」
+    if (state.restartPrompt) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissRestartPrompt,
+            title = { Text("服务端已停止") },
+            text = {
+                Text(
+                    "Android 上 JVM 无法在 App 进程内重建，所以停止后不能原地再次开服。\n\n" +
+                        "需要完全退出 App（从最近任务划掉，或点下面的按钮）后重新打开本机开服。\n" +
+                        "核心、世界存档、JRE 都已保留，无需重新下载。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.dismissRestartPrompt()
+                    exitAppCompletely(context)
+                }) { Text("退出 App") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissRestartPrompt) { Text("稍后") }
+            },
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -82,7 +132,7 @@ fun LocalHostScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             Text(
-                "在手机上直接开服：JVM 在 App 进程内启动，无需 Termux / 守护进程 / WebUI。",
+                "在手机上直接开服：JVM 在 App 进程内启动、前台服务保活，无需 Termux / 守护进程 / WebUI。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -248,9 +298,16 @@ fun LocalHostScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Text(
+                        "默认值来自「设置 → 本地开服设置」；当前：" +
+                            (if (state.keepAlive) "后台保活开" else "仅前台运行") + "、" +
+                            (if (state.useSerialGc) "SerialGC" else "运行时默认 GC"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(
-                            onClick = viewModel::start,
+                            onClick = onStartClick,
                             enabled = !state.running,
                             modifier = Modifier.weight(1f),
                         ) { Text(if (state.running) "运行中" else "启动") }
@@ -261,7 +318,8 @@ fun LocalHostScreen(
                         ) { Text("停止") }
                     }
                     Text(
-                        "注意：JVM 创建后无法在进程内重建，停止服务端后需完全退出 App 才能再次启动；App 被系统杀进程时服务端也会停止。",
+                        "注意：JVM 创建后无法在进程内重建，停止服务端后需完全退出 App 才能再次启动；" +
+                            "App 被系统杀进程时服务端也会停止。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -313,6 +371,15 @@ fun LocalHostScreen(
             Spacer(Modifier.height(16.dp))
         }
     }
+}
+
+/** 完全退出 App：结束所有 Activity 并杀掉进程，从而释放进程内 JVM（再次开服的前提）。 */
+private fun exitAppCompletely(context: Context) {
+    val activity = generateSequence(context as Context?) { (it as? ContextWrapper)?.baseContext }
+        .filterIsInstance<Activity>()
+        .firstOrNull()
+    activity?.finishAffinity()
+    Process.killProcess(Process.myPid())
 }
 
 @Composable

@@ -30,7 +30,12 @@ class LocalJvmLauncher(
     private val minMemM: Int,
     private val maxMemM: Int,
     private val extraArgs: List<String> = emptyList(),
+    private val useSerialGc: Boolean = true,
 ) {
+
+    /** 服务端主类返回时回调（工作线程里调用，实现方需自行切线程）。 */
+    @Volatile
+    var onExit: ((Int) -> Unit)? = null
 
     private val _logs = Channel<String>(Channel.BUFFERED)
     val logs: Flow<String> = _logs.receiveAsFlow()
@@ -101,6 +106,7 @@ class LocalJvmLauncher(
             exitCode = code
             emit(if (code == 0) "服务端已退出" else "服务端异常退出（rc=$code）")
             AppLogger.i("LocalEngine", "服务端线程结束 rc=$code")
+            onExit?.invoke(code)
         }, "mslx-server").apply {
             isDaemon = true
             start()
@@ -131,8 +137,8 @@ class LocalJvmLauncher(
         return buildList {
             add("-Xms${minMemM}M")
             add("-Xmx${maxMemM}M")
-            // Android 上 G1 表现不稳（PojavLauncher 同样固定 SerialGC），用户可用额外参数覆盖
-            add("-XX:+UseSerialGC")
+            // Android 上 G1 表现不稳（PojavLauncher 同样固定 SerialGC），可在设置里关闭或用额外参数覆盖
+            if (useSerialGc) add("-XX:+UseSerialGC")
             add("-Djava.home=${jreHome.absolutePath}")
             add("-Djava.class.path=$classpath")
             add("-Djava.library.path=${jreHome.absolutePath}/lib:${jreHome.absolutePath}/lib/server")

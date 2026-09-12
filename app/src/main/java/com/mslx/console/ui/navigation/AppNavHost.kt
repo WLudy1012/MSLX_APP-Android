@@ -31,6 +31,7 @@ import com.mslx.console.ui.settings.InstanceSettingsScreen
 import com.mslx.console.ui.settings.FileManagerScreen
 import com.mslx.console.ui.settings.PluginsModsScreen
 import com.mslx.console.ui.settings.ServerPropertiesScreen
+import com.mslx.console.ui.settings.LocalServerSettingsScreen
 import com.mslx.console.ui.settings.SettingsScreen
 import com.mslx.console.ui.settings.AppearanceScreen
 import com.mslx.console.ui.settings.AboutScreen
@@ -57,6 +58,7 @@ object Routes {
     const val ABOUT = "about"
     const val LOGS = "logs"
     const val LOCAL_SERVER = "localServer"
+    const val LOCAL_SERVER_SETTINGS = "localServerSettings"
 
     fun console(instanceId: Long): String = "console/$instanceId"
     fun connect(auto: Boolean, daemonId: String? = null): String =
@@ -244,11 +246,18 @@ fun AppNavHost(
                     onOpenLocalServer = {
                         navController.navigate(Routes.LOCAL_SERVER) { launchSingleTop = true }
                     },
+                    onOpenLocalServerSettings = {
+                        navController.navigate(Routes.LOCAL_SERVER_SETTINGS) { launchSingleTop = true }
+                    },
                 )
             }
 
             composable(Routes.LOCAL_SERVER) {
                 LocalHostScreen(onBack = { navController.popBackStack() })
+            }
+
+            composable(Routes.LOCAL_SERVER_SETTINGS) {
+                LocalServerSettingsScreen(onBack = { navController.popBackStack() })
             }
 
             composable(Routes.APPEARANCE) {

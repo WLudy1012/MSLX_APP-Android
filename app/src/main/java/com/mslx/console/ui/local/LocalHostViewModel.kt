@@ -8,14 +8,13 @@ import com.mslx.console.data.AppLogger
 import com.mslx.console.data.InstanceRepository
 import com.mslx.console.data.localengine.LocalCoreInstaller
 import com.mslx.console.data.localengine.LocalJreManager
-import com.mslx.console.data.localengine.LocalJvmLauncher
+import com.mslx.console.data.localengine.LocalServerRuntime
 import com.mslx.console.localengine.NativeVm
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
 data class LocalHostUiState(
@@ -37,40 +36,86 @@ data class LocalHostUiState(
     val coreProgress: Float = 0f,
     val jarInstalled: Boolean = false,
     val jarPath: String = "",
-    // 服务端配置（参照 daemon 实例）
+    // 服务端配置（默认值来自「本地开服设置」，页面内可临时覆盖）
     val serverName: String = "本地服务器",
     val minMem: Int = 1024,
     val maxMem: Int = 2048,
     val jvmArgs: String = "",
+    val keepAlive: Boolean = true,
+    val useSerialGc: Boolean = true,
     // 运行
     val running: Boolean = false,
     val jvmCreated: Boolean = false,
+    val restartPrompt: Boolean = false,
     val logs: List<String> = emptyList(),
     val message: String? = null,
 )
 
 /**
- * 本机开服（进程内 JVM 架构）：内嵌/下载 Android JRE → 解压到私有目录 →
- * native dlopen(libjvm.so) + JNI_CreateJavaVM 在 App 进程内起服 → 控制台经 pipe 收发。
+ * 本机开服（进程内 JVM）：JRE 内嵌/下载 → 核心下载 → 前台服务保活下启动服务端。
+ * 运行实例与日志挂在进程级的 [LocalServerRuntime]，所以离开页面再回来、或 App 退到后台都不丢。
  */
 class LocalHostViewModel(application: Application) : AndroidViewModel(application) {
 
     private val worldsDir = File(application.filesDir, "worlds")
 
-    private val repository: InstanceRepository = getApplication<MSLXApplication>().container.instanceRepository
+    private val container = getApplication<MSLXApplication>().container
+    private val repository: InstanceRepository = container.instanceRepository
+    private val store = container.settingsStore
     private val coreInstaller = LocalCoreInstaller(repository)
 
     private val _state = MutableStateFlow(LocalHostUiState())
     val state = _state.asStateFlow()
 
-    private var launcher: LocalJvmLauncher? = null
+    /** 用于识别「运行中 → 已停止」跳变，触发重启提示弹窗。 */
+    private var wasRunning = false
 
     init {
         refreshJre()
         refreshCores()
+        loadDefaults()
+        observeRuntime()
     }
 
     fun update(transform: (LocalHostUiState) -> LocalHostUiState) = _state.update(transform)
+
+    private fun observeRuntime() {
+        viewModelScope.launch {
+            LocalServerRuntime.logs.collect { list -> _state.update { it.copy(logs = list) } }
+        }
+        viewModelScope.launch {
+            LocalServerRuntime.running.collect { running ->
+                val stopped = wasRunning && !running
+                wasRunning = running
+                _state.update {
+                    it.copy(
+                        running = running,
+                        jvmCreated = NativeVm.isJvmCreated(),
+                        restartPrompt = it.restartPrompt || stopped,
+                    )
+                }
+            }
+        }
+    }
+
+    /** 读取「本地开服设置」中的默认内存 / JVM 参数 / 保活开关。 */
+    private fun loadDefaults() {
+        viewModelScope.launch {
+            runCatching { store.settingsFlow.first() }
+                .onSuccess { s ->
+                    _state.update {
+                        it.copy(
+                            minMem = s.localMinMemMb,
+                            maxMem = s.localMaxMemMb,
+                            jvmArgs = s.localJvmArgs,
+                            keepAlive = s.localKeepAlive,
+                            useSerialGc = s.localUseSerialGc,
+                        )
+                    }
+                }
+                .onFailure { AppLogger.w("LocalHost", "读取本地开服默认设置失败", it) }
+        }
+    }
 
     fun refreshJre() {
         val context = getApplication<Application>()
@@ -87,7 +132,7 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** 安装 JRE：优先用 APK 内嵌归档，缺失时按预设地址下载（都做 SHA-256 校验）。 */
+    /** 安装 JRE：优先 APK 内嵌归档，缺失时按预设地址下载（都做 SHA-256 校验）。 */
     fun installJre() {
         if (_state.value.jreInstalling) return
         _state.update { it.copy(jreInstalling = true, jreProgress = 0f, message = null) }
@@ -122,7 +167,6 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
         _state.update { it.copy(coreName = name, coreVersion = "", coresLoading = true) }
         viewModelScope.launch {
             val versions = coreInstaller.fetchVersions(name)
-            // 版本列表通常由旧到新，取最后一个作为默认
             val version = versions.lastOrNull().orEmpty()
             _state.update { it.copy(coreVersions = versions, coreVersion = version, coresLoading = false) }
         }
@@ -175,49 +219,52 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
         if (NativeVm.isJvmCreated()) {
-            _state.update { it.copy(message = "本进程已创建过 JVM，Android 上无法重启：请完全退出 App 后重试") }
-            return
-        }
-        val jreHome = LocalJreManager.jreHome(getApplication())
-        val extraArgs = s.jvmArgs.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-        val workDir = File(worldsDir, s.serverName.replace(Regex("[^A-Za-z0-9._-]"), "_"))
-        val engine = LocalJvmLauncher(
-            jreHome = jreHome,
-            serverJar = File(s.jarPath),
-            workDir = workDir,
-            minMemM = s.minMem,
-            maxMemM = s.maxMem,
-            extraArgs = extraArgs,
-        )
-        launcher = engine
-        viewModelScope.launch {
-            engine.logs.collect { line ->
-                _state.update { it.copy(logs = (it.logs + line).takeLast(800)) }
-            }
-        }
-        viewModelScope.launch {
-            val ok = withContext(Dispatchers.IO) { engine.start() }
             _state.update {
                 it.copy(
-                    running = ok,
-                    jvmCreated = NativeVm.isJvmCreated(),
-                    message = if (ok) null else "启动失败：详见下方日志",
+                    message = "本进程已创建过 JVM，Android 上无法重启：请完全退出 App 后重试",
+                    restartPrompt = true,
                 )
             }
+            return
+        }
+        val context = getApplication<Application>()
+        val extraArgs = s.jvmArgs.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        val workDir = File(worldsDir, s.serverName.replace(Regex("[^A-Za-z0-9._-]"), "_"))
+        LocalServerRuntime.clearLogs()
+        _state.update { it.copy(message = null, logs = emptyList()) }
+        viewModelScope.launch {
+            LocalServerRuntime.start(
+                context = context,
+                jreHome = LocalJreManager.jreHome(context),
+                serverJar = File(s.jarPath),
+                workDir = workDir,
+                serverName = s.serverName,
+                minMemM = s.minMem,
+                maxMemM = s.maxMem,
+                extraArgs = extraArgs,
+                useSerialGc = s.useSerialGc,
+                keepAlive = s.keepAlive,
+            ).onFailure { e ->
+                AppLogger.e("LocalHost", "启动本机服务端失败", e)
+                _state.update { it.copy(message = "启动失败：${e.message ?: "详见日志"}", running = false) }
+            }
+            refreshJre()
         }
     }
 
     fun stop() {
-        val engine = launcher
-        if (engine == null || !engine.running) {
+        if (!_state.value.running) {
             _state.update { it.copy(message = "服务端未在运行") }
             return
         }
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) { engine.stop() }
-            _state.update { it.copy(running = engine.running, message = "已发送 stop，等待服务端保存并退出") }
-        }
+        LocalServerRuntime.stop()
+        _state.update { it.copy(message = "已发送 stop，等待服务端保存并退出") }
     }
 
-    fun clearLogs() = _state.update { it.copy(logs = emptyList(), message = null) }
+    fun dismissRestartPrompt() = _state.update { it.copy(restartPrompt = false) }
+
+    fun clearLogs() {
+        LocalServerRuntime.clearLogs()
+        _state.update { it.copy(logs = emptyList(), message = null) }
+    }
 }

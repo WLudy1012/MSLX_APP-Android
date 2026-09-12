@@ -71,6 +71,7 @@ fun SettingsScreen(
     onOpenLogs: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenLocalServer: () -> Unit,
+    onOpenLocalServerSettings: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -214,6 +215,12 @@ fun SettingsScreen(
                         title = "本机开服",
                         subtitle = "在手机上直接开服（进程内 JVM，无需 Termux）",
                         onClick = onOpenLocalServer,
+                    )
+                    EntryRow(
+                        icon = { Icon(Icons.Filled.Settings, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "本地开服设置",
+                        subtitle = "内存、JVM 参数、后台保活",
+                        onClick = onOpenLocalServerSettings,
                     )
                 }
             }
