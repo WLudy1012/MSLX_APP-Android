@@ -64,6 +64,15 @@ if (Test-Path $BuildTools) {
     }
 }
 
+# ---------- Embedded JRE assets (本机开服需要) ----------
+$JreAssetDir = Join-Path $Root "app\src\main\assets\jre"
+$HasJre = (Test-Path $JreAssetDir) -and (Get-ChildItem $JreAssetDir -Filter *.tar.xz -ErrorAction SilentlyContinue).Count -gt 0
+if (-not $HasJre) {
+    Write-Host "[1.5/5] JRE assets missing, fetching ..." -ForegroundColor Yellow
+    & (Join-Path $Root "fetch-jre-assets.ps1")
+    if ($LASTEXITCODE -ne 0) { Write-Warning "fetch-jre-assets.ps1 failed - building without embedded JRE" }
+}
+
 # ---------- Gradle assembleRelease ----------
 $Gradlew = Join-Path $Root "gradlew.bat"
 if (-not (Test-Path $Gradlew)) { throw "gradlew.bat not found in $Root" }
@@ -76,6 +85,18 @@ if ($LASTEXITCODE -ne 0) { throw "Gradle build failed (exit $LASTEXITCODE)." }
 # ---------- Locate APK & read effective versionName ----------
 $SrcApk = Join-Path $Root "app\build\outputs\apk\release\app-release.apk"
 if (-not (Test-Path $SrcApk)) { throw "APK not produced: $SrcApk" }
+
+# APK 内容自检：本机开服依赖内嵌 JRE 与 native 桥接库（用 bsdtar 列 zip 条目，避免 .NET 程序集依赖）
+$apkEntries = tar -tf $SrcApk 2>$null
+if ($apkEntries) {
+    $jreEntry = $apkEntries | Where-Object { $_ -like "assets/jre/*.tar.xz" }
+    $soEntry = $apkEntries | Where-Object { $_ -like "lib/*/libmslxvm.so" }
+    if ($jreEntry) { Write-Host "      embedded JRE : $($jreEntry -join ', ')" -ForegroundColor DarkGray }
+    else { Write-Warning "APK 内没有 assets/jre/*.tar.xz：本机开服将只能走下载路径" }
+    if ($soEntry) { Write-Host "      native vm    : $($soEntry -join ', ')" -ForegroundColor DarkGray }
+    else { Write-Warning "APK 内没有 lib/*/libmslxvm.so：进程内 JVM 不可用" }
+}
+
 $EffVersion = $VersionName
 if (-not $EffVersion -and $Aapt) {
     $Badging = & $Aapt.FullName "dump" "badging" $SrcApk 2>$null

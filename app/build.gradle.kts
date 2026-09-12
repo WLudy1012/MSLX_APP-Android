@@ -16,6 +16,8 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "com.mslx.console"
     compileSdk = 35
+    // 本机开服需要 NDK：进程内 JVM 桥接（dlopen libjvm.so + JNI_CreateJavaVM）
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "com.mslx.console"
@@ -24,6 +26,17 @@ android {
         versionCode = 27
         // CI Actions 构建会以 -PversionName=x.x.x.x 覆盖（见 android.yml Compute Actions version）
         versionName = (project.findProperty("versionName") as String?) ?: "1.6.1"
+
+        ndk {
+            // arm64 真机 + x86_64 模拟器（本机开服调试用）
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+    }
+
+    externalNativeBuild {
+        ndkBuild {
+            path = file("src/main/cpp/Android.mk")
+        }
     }
 
     signingConfigs {
@@ -76,6 +89,11 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    androidResources {
+        // 内嵌 JRE 是 .tar.xz，再压缩没有收益，跳过以加快打包
+        noCompress += "xz"
+    }
 }
 
 dependencies {
@@ -103,6 +121,10 @@ dependencies {
     implementation(libs.signalr)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
+
+    // 本机开服：解压内嵌 Android JRE（上游 .tar.xz）
+    implementation(libs.xz)
+    implementation(libs.commons.compress)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

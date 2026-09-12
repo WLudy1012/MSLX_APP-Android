@@ -1,124 +1,253 @@
 package com.mslx.console.data.localengine
 
+import android.content.Context
+import android.os.Build
 import com.mslx.console.data.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.InputStream
 import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 
 /**
- * 通用下载器：流式下载到目标文件，支持进度回调与 SHA-256 校验。
- */
-object LocalDownloader {
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)
-        .build()
-
-    /** 下载 [url] 到 [target]；[expectedSha256] 非空时校验（不匹配抛异常）。 */
-    suspend fun download(url: String, target: File, expectedSha256: String? = null, onProgress: (Float) -> Unit = {}): File =
-        withContext(Dispatchers.IO) {
-            val request = okhttp3.Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
-                val body = response.body ?: throw IllegalStateException("响应为空")
-                val total = body.contentLength()
-                val digest = MessageDigest.getInstance("SHA-256")
-                target.parentFile?.mkdirs()
-                body.byteStream().use { input ->
-                    target.outputStream().use { output ->
-                        val buf = ByteArray(64 * 1024)
-                        var done = 0L
-                        while (true) {
-                            val read = input.read(buf)
-                            if (read < 0) break
-                            output.write(buf, 0, read)
-                            digest.update(buf, 0, read)
-                            done += read
-                            if (total > 0) onProgress(done.toFloat() / total)
-                        }
-                    }
-                }
-                if (expectedSha256 != null) {
-                    val actual = digest.digest().joinToString("") { "%02x".format(it) }
-                    if (!actual.equals(expectedSha256.lowercase(), ignoreCase = true)) {
-                        throw IllegalStateException("SHA-256 校验失败: 期望 $expectedSha256 实际 $actual")
-                    }
-                }
-                target
-            }
-        }
-}
-
-/**
- * Android JRE 管理器：从 zip 包下载/解压到 App 私有目录（PojavLauncher 同思路的 bionic JRE），
- * 供本机开服引擎直接 exec java。
+ * Android JRE 运行时管理。
+ *
+ * 来源：上游 PojavLauncher 的 Android OpenJDK 构建（bionic，arm64-v8a / x86_64），
+ * 发行包为 `.tar.xz`，解包后根目录即 `bin/ lib/ conf/`（见 38/40 节文档）。
+ *
+ * 我们只依赖 `lib/server/libjvm.so` 与 `lib/modules`：JVM 由 native 层
+ * dlopen + JNI_CreateJavaVM 在 **App 进程内**起，不 exec `bin/java`
+ * —— Android 10+ 禁止 targetSdk≥29 的应用 exec 自己 data 目录里的文件。
+ *
+ * 运行时包优先取 APK assets 内嵌归档（离线可用），缺失时回退到预设下载地址（固定 SHA-256）。
  */
 object LocalJreManager {
 
+    /** 运行时标识（决定安装目录与上游版本）。 */
+    const val RUNTIME_ID = "jre17"
+
+    /** 该运行时对应的 Java 主版本；服务端核心必须兼容（Paper 1.20.5+/1.21 需 Java 21，暂不支持）。 */
+    const val JAVA_MAJOR = 17
+
+    private const val ASSET_DIR = "jre"
+    private const val UPSTREAM_BASE =
+        "https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ec28559"
+
+    /** 某个 ABI 对应的运行时归档：assets 内嵌名 / 预设下载地址 / 固定 SHA-256。 */
+    data class RuntimeSpec(
+        val assetName: String,
+        val url: String,
+        val sha256: String,
+    )
+
+    val ARM64 = RuntimeSpec(
+        assetName = "jre17-arm64-20210825-release.tar.xz",
+        url = "$UPSTREAM_BASE/jre17-arm64-20210825-release.tar.xz",
+        sha256 = "c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d",
+    )
+
+    val X86_64 = RuntimeSpec(
+        assetName = "jre17-x86_64-20210825-release.tar.xz",
+        url = "$UPSTREAM_BASE/jre17-x86_64-20210825-release.tar.xz",
+        sha256 = "ebbdf75ab864a83671a108032c30e67174f79cc19596cfc1d7bfb71be26b6e71",
+    )
+
+    fun specForAbi(abi: String): RuntimeSpec? = when (abi) {
+        "arm64-v8a", "arm64" -> ARM64
+        "x86_64" -> X86_64
+        else -> null
+    }
+
+    /** 当前设备首选的受支持 ABI。 */
+    fun currentAbi(): String {
+        val supported = Build.SUPPORTED_ABIS.orEmpty()
+        return supported.firstOrNull { specForAbi(it) != null } ?: supported.firstOrNull() ?: "arm64-v8a"
+    }
+
+    /** 该 ABI 的归档是否随 APK 内嵌（UI 用来显示"内嵌 / 需下载"）。 */
+    fun hasEmbeddedAsset(context: Context, abi: String = currentAbi()): Boolean {
+        val spec = specForAbi(abi) ?: return false
+        return context.assets.list(ASSET_DIR).orEmpty().any { it == spec.assetName }
+    }
+
+    /** JRE 安装根目录（= java.home）；必须在私有目录（外部存储 noexec 且 dlopen 也不可靠）。 */
+    fun jreHome(context: Context): File = File(context.filesDir, "jre/$RUNTIME_ID")
+
+    /** 进程内 JVM 真正需要的库。 */
+    fun libjvmFile(context: Context): File = File(jreHome(context), "lib/server/libjvm.so")
+
+    private fun modulesFile(context: Context): File = File(jreHome(context), "lib/modules")
+
+    private fun markerFile(context: Context): File = File(jreHome(context), ".mslx-runtime")
+
+    fun isInstalled(context: Context): Boolean =
+        libjvmFile(context).isFile && modulesFile(context).isFile
+
+    /** 已安装运行时描述（供 UI 展示），未安装返回 null。 */
+    fun installedInfo(context: Context): String? {
+        if (!isInstalled(context)) return null
+        val marker = markerFile(context).takeIf { it.isFile }
+            ?.readText()?.trim()?.lineSequence()?.firstOrNull().orEmpty()
+        val sizeMb = jreHome(context).walkTopDown().filter { it.isFile }.sumOf { it.length() } / 1024 / 1024
+        return (if (marker.isBlank()) RUNTIME_ID else marker) + " · ${sizeMb}MB"
+    }
+
     /**
-     * JRE 必须落在 **应用私有 filesDir**（不能用 getExternalFilesDir）：
-     * Android 10+ 把 /storage/emulated 挂载为 noexec，从外部存储 exec java 必然失败；
-     * 只有私有 data 分区允许执行解压出来的二进制（PojavLauncher 同做法）。
+     * 安装（或修复）JRE：优先 assets 内嵌归档，其次按预设地址下载；两种都做 SHA-256 校验后解压。
+     * 失败会清理半成品目录，绝不留下"看起来装好了"的残缺运行时。
      */
-    fun jreRoot(context: android.content.Context): File =
-        File(context.filesDir, "jre")
-
-    fun installedJava(context: android.content.Context): File =
-        File(jreRoot(context), "bin/java")
-
-    fun isInstalled(context: android.content.Context): Boolean = installedJava(context).isFile
-
-    /**
-     * 从 [url]（.zip 归档，内含 jre 根内容，如 bin/java）下载并解压到 [jreRoot]。
-     * [expectedSha256] 可空。解压前清空旧目录，含 zip-slip 防护。
-     */
-    suspend fun installFromZip(context: android.content.Context, url: String, expectedSha256: String?, onProgress: (Float) -> Unit = {}): Result<File> =
-        runCatching {
-            val root = jreRoot(context)
-            val tmp = File(root.parentFile ?: root, "jre-download.zip")
-            withContext(Dispatchers.IO) {
-                LocalDownloader.download(url, tmp, expectedSha256) { onProgress(it) }
-                root.deleteRecursively()
-                root.mkdirs()
-                extractZip(tmp, root)
-                tmp.delete()
-                // zip 解压不保留可执行位，Android 上必须显式 chmod，否则 exec java 报 Permission denied
-                root.walkTopDown().filter { it.isFile }.forEach { it.setExecutable(true, false) }
-            }
-            val java = installedJava(context)
-            if (!java.isFile) throw IllegalStateException("归档内未找到 bin/java，请确认是 Android JRE zip")
-            AppLogger.i("LocalJre", "JRE 安装完成: $java")
-            java
-        }
-
-    private fun extractZip(zip: File, destDir: File) {
-        ZipInputStream(FileInputStream(zip)).use { zis ->
-            val buf = ByteArray(64 * 1024)
-            while (true) {
-                val entry = zis.nextEntry ?: break
-                val name = entry.name
-                if (entry.isDirectory) continue
-                // zip-slip 防护
-                val resolved = File(destDir, name).canonicalFile
-                if (!resolved.path.startsWith(destDir.canonicalPath + File.separator)) {
-                    throw IllegalStateException("非法压缩条目: $name")
-                }
-                resolved.parentFile?.mkdirs()
-                resolved.outputStream().use { out ->
-                    while (true) {
-                        val read = zis.read(buf)
-                        if (read < 0) break
-                        out.write(buf, 0, read)
+    suspend fun install(context: Context, onProgress: (Float) -> Unit = {}): Result<File> = runCatching {
+        val abi = currentAbi()
+        val spec = specForAbi(abi) ?: throw IllegalStateException("当前设备 ABI（$abi）暂无可用 Android JRE")
+        val home = jreHome(context)
+        withContext(Dispatchers.IO) {
+            home.deleteRecursively()
+            home.mkdirs()
+            try {
+                val embedded = embeddedArchive(context, spec)
+                if (embedded != null) {
+                    AppLogger.i("LocalJre", "从内嵌 assets 安装 JRE：${spec.assetName}")
+                    extractAndVerify(embedded.first, embedded.second, spec, home, onProgress)
+                } else {
+                    AppLogger.i("LocalJre", "assets 未内嵌该 ABI，改为下载：${spec.url}")
+                    val tmp = File(context.cacheDir, spec.assetName)
+                    try {
+                        LocalDownloader.download(spec.url, tmp, spec.sha256) { onProgress(it * 0.5f) }
+                        extractAndVerify({ FileInputStream(tmp) }, tmp.length(), spec, home, onProgress)
+                    } finally {
+                        tmp.delete()
                     }
                 }
+                if (!isInstalled(context)) {
+                    throw IllegalStateException("解包后缺少 lib/server/libjvm.so 或 lib/modules，归档可能不是 Android JRE 构建")
+                }
+                markerFile(context).writeText("$RUNTIME_ID/$abi\n${spec.sha256}\n")
+            } catch (e: Exception) {
+                home.deleteRecursively()
+                throw e
+            }
+        }
+        AppLogger.i("LocalJre", "JRE 安装完成：${jreHome(context)}")
+        jreHome(context)
+    }
+
+    /** 内嵌归档：存在则返回 (流工厂, 长度)，否则 null。 */
+    private fun embeddedArchive(context: Context, spec: RuntimeSpec): Pair<() -> InputStream, Long>? {
+        if (!hasEmbeddedAsset(context, currentAbi())) return null
+        val path = "$ASSET_DIR/${spec.assetName}"
+        val length = runCatching { context.assets.openFd(path).length }.getOrDefault(-1L)
+        return { context.assets.open(path) } to length
+    }
+
+    private fun extractAndVerify(
+        open: () -> InputStream,
+        totalBytes: Long,
+        spec: RuntimeSpec,
+        dest: File,
+        onProgress: (Float) -> Unit,
+    ) {
+        val digest = MessageDigest.getInstance("SHA-256")
+        open().use { raw ->
+            val counting = CountingInputStream(raw, totalBytes, digest, onProgress)
+            if (spec.assetName.endsWith(".zip")) extractZip(counting, dest) else extractTarXz(counting, dest)
+        }
+        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        if (!actual.equals(spec.sha256, ignoreCase = true)) {
+            throw IllegalStateException("JRE 归档 SHA-256 校验失败：期望 ${spec.sha256}，实际 $actual")
+        }
+    }
+
+    /** 透传流：统计已读字节（进度），同时累积 SHA-256。 */
+    private class CountingInputStream(
+        private val delegate: InputStream,
+        private val total: Long,
+        private val digest: MessageDigest,
+        private val onProgress: (Float) -> Unit,
+    ) : InputStream() {
+        private var read = 0L
+
+        override fun read(): Int {
+            val b = delegate.read()
+            if (b >= 0) {
+                digest.update(b.toByte())
+                read += 1
+                report()
+            }
+            return b
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            val n = delegate.read(b, off, len)
+            if (n > 0) {
+                digest.update(b, off, n)
+                read += n
+                report()
+            }
+            return n
+        }
+
+        private fun report() {
+            if (total > 0) onProgress((read.toFloat() / total).coerceIn(0f, 1f))
+        }
+
+        override fun close() = delegate.close()
+    }
+
+    /** 解压 .tar.xz（上游格式）；软链按目标内容落成普通文件（上游仅 legal/ 下有）。 */
+    private fun extractTarXz(input: InputStream, dest: File) {
+        TarArchiveInputStream(XZCompressorInputStream(input)).use { tar ->
+            var entry = tar.nextEntry
+            while (entry != null) {
+                val name = entry.name
+                when {
+                    entry.isDirectory -> safeResolve(dest, name).mkdirs()
+
+                    entry.isSymbolicLink -> {
+                        val link = entry.linkName.orEmpty()
+                        val base = File(dest, name).parentFile ?: dest
+                        val target = File(base, link).canonicalFile
+                        if (target.isFile && target.canonicalPath.startsWith(dest.canonicalPath + File.separator)) {
+                            val out = safeResolve(dest, name)
+                            out.parentFile?.mkdirs()
+                            target.copyTo(out, overwrite = true)
+                        }
+                    }
+
+                    else -> {
+                        val out = safeResolve(dest, name)
+                        out.parentFile?.mkdirs()
+                        out.outputStream().use { tar.copyTo(it, 64 * 1024) }
+                    }
+                }
+                entry = tar.nextEntry
+            }
+        }
+    }
+
+    /** 解压 .zip（第三方来源兜底）。 */
+    private fun extractZip(input: InputStream, dest: File) {
+        ZipInputStream(input).use { zis ->
+            while (true) {
+                val entry = zis.nextEntry ?: break
+                if (entry.isDirectory) continue
+                val out = safeResolve(dest, entry.name)
+                out.parentFile?.mkdirs()
+                out.outputStream().use { zis.copyTo(it, 64 * 1024) }
                 zis.closeEntry()
             }
         }
+    }
+
+    /** tar-slip / zip-slip 防护：解包路径必须落在目标目录内。 */
+    private fun safeResolve(dest: File, name: String): File {
+        val resolved = File(dest, name).canonicalFile
+        if (!resolved.path.startsWith(dest.canonicalPath + File.separator)) {
+            throw IllegalStateException("非法归档条目：$name")
+        }
+        return resolved
     }
 }

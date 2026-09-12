@@ -211,8 +211,8 @@ fun SettingsScreen(
                     )
                     EntryRow(
                         icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "本机开服（实验）",
-                        subtitle = "直接在本机启动服务端，需 Android JRE",
+                        title = "本机开服",
+                        subtitle = "在手机上直接开服（进程内 JVM，无需 Termux）",
                         onClick = onOpenLocalServer,
                     )
                 }
