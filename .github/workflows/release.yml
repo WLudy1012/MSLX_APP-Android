@@ -16,8 +16,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # 完整克隆以获取历史提交与 tag（生成 release notes 需要）
+          # 完整克隆以获取历史提交与 tag
           fetch-depth: 0
+          # 必须显式取 tag：否则 git tag --list 为空 → 找不到"上一版本"，
+          # release notes 会退化成"把以往所有提交都列出来"
+          fetch-tags: true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -110,29 +113,37 @@ jobs:
       #     回退到最近一个不带 -Beta 的 tag。
       - name: Generate release notes
         run: |
-          CUR_TAG="${{ github.ref_name }}"
+          set -e
+          CUR_TAG="${GITHUB_REF_NAME:-$(git describe --tags --exact-match)}"
+          # 双保险：显式同步远端 tag（checkout 已带 fetch-tags，这里再兜一次）
+          git fetch --tags --force --quiet || true
+          echo "当前 tag: $CUR_TAG；可见 v* tag 数量: $(git tag --list 'v*' | wc -l)"
           IS_BETA=$(echo "$CUR_TAG" | grep -qiE -- '-beta$' && echo 1 || echo 0)
           if [ "$IS_BETA" = "1" ]; then
-            PREV_TAG=$(git tag --list 'v*' | grep -iE -- '-beta$' | grep -v "^$CUR_TAG$" | sort -V | tail -1)
+            PREV_TAG=$(git tag --list 'v*' | grep -iE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1)
             if [ -z "$PREV_TAG" ]; then
-              PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^$CUR_TAG$" | sort -V | tail -1)
+              PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1)
             fi
           else
-            PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^$CUR_TAG$" | sort -V | tail -1)
+            PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1)
           fi
+          echo "上一版本 tag: ${PREV_TAG:-<无>}"
           {
             echo "# MSLX_APP-Android $CUR_TAG"
             echo ""
             if [ -n "$PREV_TAG" ]; then
-              echo "自 $PREV_TAG 以来的提交："
+              echo "自 \`$PREV_TAG\` 以来的提交："
               echo ""
-              git log --pretty=format:"- %s" "$PREV_TAG..HEAD"
+              git log --no-merges --pretty=format:"- %s" "${PREV_TAG}..${CUR_TAG}"
             else
-              echo "提交："
+              # 绝不回退成"列出全部历史提交"：只给最近若干条并说明原因
+              echo "> 未能确定上一版本 tag（首个版本或 tag 未同步），仅列出最近 15 条提交。"
               echo ""
-              git log --pretty=format:"- %s"
+              git log -n 15 --no-merges --pretty=format:"- %s" "${CUR_TAG}"
             fi
             echo ""
+            echo ""
+            echo "> 上一版本：\`${PREV_TAG:-无}\`"
           } > release_notes.md
 
       # 计算两个变体的 SHA256 并写入 release notes，供用户校验文件完整性

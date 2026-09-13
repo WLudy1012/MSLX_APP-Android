@@ -19,6 +19,8 @@ jobs:
         with:
           # 生成 dev 构建说明与 Actions 版本号时需要 tag 与提交信息
           fetch-depth: 0
+          # 必须显式取 tag：git describe --tags 依赖它算 Actions 四段版本号
+          fetch-tags: true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4

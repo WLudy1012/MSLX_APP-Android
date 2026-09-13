@@ -8,6 +8,8 @@ import com.mslx.console.data.AppLogger
 import com.mslx.console.data.InstanceRepository
 import com.mslx.console.data.localengine.LocalCoreInstaller
 import com.mslx.console.data.localengine.LocalInstanceMeta
+import com.mslx.console.data.localengine.LocalInstanceStore
+import com.mslx.console.data.localengine.LocalInstanceSummary
 import com.mslx.console.data.localengine.LocalJreManager
 import com.mslx.console.data.localengine.LocalServerRuntime
 import com.mslx.console.data.localengine.LocalStorage
@@ -44,6 +46,10 @@ data class LocalHostUiState(
     /** 实例目录（数据目录下的相对路径，如 servers/本地服务器）与文件补全情况。 */
     val instancePath: String = "",
     val instanceFiles: List<Pair<String, Boolean>> = emptyList(),
+    // 多实例管理（mslx/servers 下一目录一实例）
+    val instances: List<LocalInstanceSummary> = emptyList(),
+    val activeDirName: String = "",
+    val deleteTarget: LocalInstanceSummary? = null,
     // 服务端配置（默认值来自「本地开服设置」，页面内可临时覆盖）
     val serverName: String = "本地服务器",
     val minMem: Int = 1024,
@@ -92,12 +98,19 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
         loadDefaults()
         observeRuntime()
         refreshInstance()
+        refreshInstances()
     }
 
     /** 刷新当前实例目录与其文件补全情况（UI 展示「服务器目录」与文件清单）。 */
     fun refreshInstance() {
         val context = getApplication<Application>()
-        val dir = LocalStorage.serverDir(context, _state.value.serverName)
+        val current = _state.value
+        // 已选中某个实例时以该目录为准；否则按输入框里的名称推导（新建场景）
+        val dir = if (current.activeDirName.isNotBlank()) {
+            LocalInstanceStore.dir(context, current.activeDirName)
+        } else {
+            LocalStorage.serverDir(context, current.serverName)
+        }
         val jar = File(dir, ServerFiles.SERVER_JAR_NAME)
         _state.update {
             it.copy(
@@ -106,6 +119,105 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
                 jarInstalled = jar.isFile,
                 jarPath = jar.absolutePath,
             )
+        }
+    }
+
+    /** 扫描本地实例列表（mslx/servers 下一目录一实例）。 */
+    fun refreshInstances() {
+        val list = LocalInstanceStore.list(getApplication())
+        _state.update { it.copy(instances = list) }
+    }
+
+    /** 切换到某个已存在实例：把它的元数据回填到表单（运行中禁止切换）。 */
+    fun selectInstance(dirName: String) {
+        if (_state.value.running) {
+            _state.update { it.copy(message = "服务端运行中，暂时不能切换实例") }
+            return
+        }
+        val meta = LocalInstanceStore.load(getApplication(), dirName)
+        if (meta == null) {
+            _state.update { it.copy(message = "实例不存在：$dirName") }
+            refreshInstances()
+            return
+        }
+        _state.update {
+            it.copy(
+                activeDirName = dirName,
+                serverName = meta.name.ifBlank { dirName },
+                coreName = meta.core.ifBlank { it.coreName },
+                coreVersion = meta.coreVersion,
+                minMem = meta.minMemMb,
+                maxMem = meta.maxMemMb,
+                jvmArgs = meta.jvmArgs,
+                keepAlive = meta.keepAlive,
+                useSerialGc = meta.useSerialGc,
+                serverPort = meta.serverPort,
+                motd = meta.motd,
+                maxPlayers = meta.maxPlayers,
+                onlineMode = meta.onlineMode,
+                difficulty = meta.difficulty,
+                gamemode = meta.gamemode,
+                message = "已切换到实例「${meta.name.ifBlank { dirName }}」",
+            )
+        }
+        refreshInstance()
+    }
+
+    /** 新建实例：清空选中状态并重置表单（下载核心时按新名称建目录）。 */
+    fun newInstance() {
+        if (_state.value.running) {
+            _state.update { it.copy(message = "服务端运行中，暂时不能新建实例") }
+            return
+        }
+        _state.update {
+            it.copy(
+                activeDirName = "",
+                serverName = ServerFiles.DEFAULT_SERVER_NAME,
+                motd = "",
+                serverPort = 25565,
+                maxPlayers = 20,
+                onlineMode = true,
+                difficulty = "easy",
+                gamemode = "survival",
+                message = "已切到新建实例：下载核心后会创建 servers/${LocalStorage.sanitizeName(ServerFiles.DEFAULT_SERVER_NAME)}",
+            )
+        }
+        refreshInstance()
+    }
+
+    /** 请求删除实例（弹确认框；运行中的当前实例不允许删除）。 */
+    fun requestDelete(summary: LocalInstanceSummary) {
+        if (_state.value.running && _state.value.activeDirName == summary.dirName) {
+            _state.update { it.copy(message = "该实例正在运行，请先停止服务端") }
+            return
+        }
+        _state.update { it.copy(deleteTarget = summary) }
+    }
+
+    fun dismissDelete() = _state.update { it.copy(deleteTarget = null) }
+
+    /** 确认删除实例目录（世界存档一并删除，不可恢复）。 */
+    fun confirmDelete() {
+        val target = _state.value.deleteTarget ?: return
+        val context = getApplication<Application>()
+        viewModelScope.launch {
+            LocalInstanceStore.delete(context, target.dirName)
+                .onSuccess {
+                    AppLogger.i("LocalInstance", "实例已删除：${target.dirName}")
+                    _state.update {
+                        it.copy(
+                            deleteTarget = null,
+                            message = "已删除实例「${target.name}」及其目录",
+                            activeDirName = if (it.activeDirName == target.dirName) "" else it.activeDirName,
+                        )
+                    }
+                    refreshInstances()
+                    refreshInstance()
+                }
+                .onFailure { e ->
+                    AppLogger.w("LocalInstance", "删除实例失败：${target.dirName}", e)
+                    _state.update { it.copy(deleteTarget = null, message = "删除失败：${e.message}") }
+                }
         }
     }
 
@@ -242,11 +354,13 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
                             coreDownloading = false,
                             jarInstalled = true,
                             jarPath = jar.absolutePath,
+                            activeDirName = meta.directory,
                             instancePath = LocalStorage.displayPath(context, serverDir),
                             instanceFiles = ServerFiles.listInstanceFiles(serverDir),
                             message = "核心下载完成，实例文件已补全（${meta.directory}）",
                         )
                     }
+                    refreshInstances()
                 }
                 .onFailure { e ->
                     AppLogger.e("LocalHost", "核心下载失败", e)

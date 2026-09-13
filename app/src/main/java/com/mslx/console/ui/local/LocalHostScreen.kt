@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -113,6 +114,28 @@ fun LocalHostScreen(
         )
     }
 
+    // 删除实例确认
+    state.deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissDelete,
+            title = { Text("删除实例") },
+            text = {
+                Text(
+                    "将删除实例「${target.name}」的整个目录（含世界存档、配置、日志，约 ${target.sizeMb}MB）。\n" +
+                        "此操作不可恢复。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmDelete) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissDelete) { Text("取消") }
+            },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -138,6 +161,63 @@ fun LocalHostScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(10.dp))
+
+            // ---------- 0. 本地实例列表（mslx/servers 下一目录一实例） ----------
+            Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("本地实例", style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = viewModel::refreshInstances) { Text("刷新") }
+                    }
+                    if (state.instances.isEmpty()) {
+                        Text(
+                            "还没有实例：选好核心后点「下载服务端核心」，会自动在 servers/ 下建目录并补全文件。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        state.instances.forEach { inst ->
+                            val active = inst.dirName == state.activeDirName
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = inst.name + if (active) "（当前）" else "",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        text = inst.subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                TextButton(
+                                    onClick = { viewModel.selectInstance(inst.dirName) },
+                                    enabled = !state.running && !active,
+                                ) { Text("切换") }
+                                IconButton(
+                                    onClick = { viewModel.requestDelete(inst) },
+                                    enabled = !(state.running && active),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Delete,
+                                        contentDescription = "删除实例",
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = viewModel::newInstance,
+                        enabled = !state.running,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("新建实例") }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
 
             // ---------- 1. Java 运行时 ----------
             Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
