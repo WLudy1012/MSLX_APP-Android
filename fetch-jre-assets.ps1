@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Fetch the embedded Android JRE runtime archives into app assets.
 

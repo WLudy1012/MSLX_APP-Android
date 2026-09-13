@@ -7,8 +7,11 @@ import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppLogger
 import com.mslx.console.data.InstanceRepository
 import com.mslx.console.data.localengine.LocalCoreInstaller
+import com.mslx.console.data.localengine.LocalInstanceMeta
 import com.mslx.console.data.localengine.LocalJreManager
 import com.mslx.console.data.localengine.LocalServerRuntime
+import com.mslx.console.data.localengine.LocalStorage
+import com.mslx.console.data.localengine.ServerFiles
 import com.mslx.console.localengine.NativeVm
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +41,9 @@ data class LocalHostUiState(
     val coreProgress: Float = 0f,
     val jarInstalled: Boolean = false,
     val jarPath: String = "",
+    /** 实例目录（数据目录下的相对路径，如 servers/本地服务器）与文件补全情况。 */
+    val instancePath: String = "",
+    val instanceFiles: List<Pair<String, Boolean>> = emptyList(),
     // 服务端配置（默认值来自「本地开服设置」，页面内可临时覆盖）
     val serverName: String = "本地服务器",
     val minMem: Int = 1024,
@@ -45,6 +51,13 @@ data class LocalHostUiState(
     val jvmArgs: String = "",
     val keepAlive: Boolean = true,
     val useSerialGc: Boolean = true,
+    // 服务端 server.properties 配置（下载核心后写入实例文件）
+    val serverPort: Int = 25565,
+    val motd: String = "",
+    val maxPlayers: Int = 20,
+    val onlineMode: Boolean = true,
+    val difficulty: String = "easy",
+    val gamemode: String = "survival",
     // 运行
     val running: Boolean = false,
     val jvmCreated: Boolean = false,
@@ -59,8 +72,6 @@ data class LocalHostUiState(
  */
 class LocalHostViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val worldsDir = File(application.filesDir, "worlds")
-
     private val container = getApplication<MSLXApplication>().container
     private val repository: InstanceRepository = container.instanceRepository
     private val store = container.settingsStore
@@ -73,10 +84,29 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
     private var wasRunning = false
 
     init {
+        // 统一数据目录：旧布局（filesDir/jre、filesDir/worlds）迁移到 filesDir/mslx 下
+        LocalStorage.migrateLegacy(getApplication())
+        LocalStorage.ensureBase(getApplication())
         refreshJre()
         refreshCores()
         loadDefaults()
         observeRuntime()
+        refreshInstance()
+    }
+
+    /** 刷新当前实例目录与其文件补全情况（UI 展示「服务器目录」与文件清单）。 */
+    fun refreshInstance() {
+        val context = getApplication<Application>()
+        val dir = LocalStorage.serverDir(context, _state.value.serverName)
+        val jar = File(dir, ServerFiles.SERVER_JAR_NAME)
+        _state.update {
+            it.copy(
+                instancePath = LocalStorage.displayPath(context, dir),
+                instanceFiles = if (dir.isDirectory) ServerFiles.listInstanceFiles(dir) else emptyList(),
+                jarInstalled = jar.isFile,
+                jarPath = jar.absolutePath,
+            )
+        }
     }
 
     fun update(transform: (LocalHostUiState) -> LocalHostUiState) = _state.update(transform)
@@ -195,20 +225,26 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
         }
         if (s.coreDownloading) return
         _state.update { it.copy(coreDownloading = true, coreProgress = 0f, message = null) }
+        val context = getApplication<Application>()
+        val serverDir = LocalStorage.serverDir(context, s.serverName)
         viewModelScope.launch {
             coreInstaller.installCore(
                 core = s.coreName,
                 version = s.coreVersion,
                 build = "latest",
-                worldsDir = worldsDir,
+                serverDir = serverDir,
+                meta = buildMeta(s),
             ) { p -> _state.update { it.copy(coreProgress = p) } }
-                .onSuccess { jar ->
+                .onSuccess { (jar, meta) ->
+                    AppLogger.i("LocalHost", "核心就绪：${meta.core} ${meta.coreVersion}，实例目录 ${meta.directory}")
                     _state.update {
                         it.copy(
                             coreDownloading = false,
                             jarInstalled = true,
                             jarPath = jar.absolutePath,
-                            message = "核心下载完成",
+                            instancePath = LocalStorage.displayPath(context, serverDir),
+                            instanceFiles = ServerFiles.listInstanceFiles(serverDir),
+                            message = "核心下载完成，实例文件已补全（${meta.directory}）",
                         )
                     }
                 }
@@ -219,11 +255,64 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /** 用当前页面/设置里的参数构造实例元数据。 */
+    private fun buildMeta(s: LocalHostUiState): LocalInstanceMeta = LocalInstanceMeta(
+        name = s.serverName.ifBlank { ServerFiles.DEFAULT_SERVER_NAME },
+        directory = LocalStorage.sanitizeName(s.serverName),
+        core = s.coreName,
+        coreVersion = s.coreVersion,
+        coreBuild = "latest",
+        javaMajor = LocalJreManager.JAVA_MAJOR,
+        abi = LocalJreManager.currentAbi(),
+        minMemMb = s.minMem,
+        maxMemMb = s.maxMem,
+        jvmArgs = s.jvmArgs.trim(),
+        useSerialGc = s.useSerialGc,
+        keepAlive = s.keepAlive,
+        serverPort = s.serverPort,
+        motd = s.motd.ifBlank { s.serverName },
+        maxPlayers = s.maxPlayers,
+        onlineMode = s.onlineMode,
+        difficulty = s.difficulty,
+        gamemode = s.gamemode,
+    )
+
+    /** 更新实例文件（server.properties / instance.json 等）：已存在的不覆盖用户改动，仅补齐缺失项。 */
+    fun applyInstanceFiles() {
+        val s = _state.value
+        val context = getApplication<Application>()
+        val dir = LocalStorage.serverDir(context, s.serverName)
+        if (!dir.isDirectory || !File(dir, ServerFiles.SERVER_JAR_NAME).isFile) {
+            _state.update { it.copy(message = "请先下载服务端核心") }
+            return
+        }
+        viewModelScope.launch {
+            ServerFiles.complete(dir, buildMeta(s))
+                .onSuccess { meta ->
+                    AppLogger.i("LocalHost", "实例文件已更新：${meta.directory}")
+                    _state.update {
+                        it.copy(
+                            instancePath = LocalStorage.displayPath(context, dir),
+                            instanceFiles = ServerFiles.listInstanceFiles(dir),
+                            message = "实例文件已补全/更新（${meta.directory}）",
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    AppLogger.w("LocalHost", "补全实例文件失败", e)
+                    _state.update { it.copy(message = "补全实例文件失败：${e.message}") }
+                }
+        }
+    }
+
     fun start() {
         val s = _state.value
         if (s.running) return
-        if (!s.jarInstalled || s.jarPath.isBlank()) {
-            _state.update { it.copy(message = "请先下载服务端核心") }
+        val context = getApplication<Application>()
+        val serverDir = LocalStorage.serverDir(context, s.serverName)
+        val serverJar = File(serverDir, ServerFiles.SERVER_JAR_NAME)
+        if (!serverJar.isFile) {
+            _state.update { it.copy(message = "请先下载服务端核心（实例目录：${LocalStorage.displayPath(context, serverDir)}）") }
             return
         }
         if (!LocalJreManager.isInstalled(getApplication())) {
@@ -239,23 +328,32 @@ class LocalHostViewModel(application: Application) : AndroidViewModel(applicatio
             }
             return
         }
-        val context = getApplication<Application>()
         val extraArgs = s.jvmArgs.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-        val workDir = File(worldsDir, s.serverName.replace(Regex("[^A-Za-z0-9._-]"), "_"))
         LocalServerRuntime.clearLogs()
         _state.update { it.copy(message = null, logs = emptyList()) }
         viewModelScope.launch {
+            // 启动前再补一次实例文件：用户可能改了名称/端口，或目录被外部工具动过（幂等、不覆盖已有改动）
+            val meta = ServerFiles.complete(serverDir, buildMeta(s)).getOrElse { e ->
+                AppLogger.w("LocalHost", "启动前补全实例文件失败", e)
+                buildMeta(s)
+            }
+            _state.update {
+                it.copy(
+                    instancePath = LocalStorage.displayPath(context, serverDir),
+                    instanceFiles = ServerFiles.listInstanceFiles(serverDir),
+                )
+            }
             LocalServerRuntime.start(
                 context = context,
                 jreHome = LocalJreManager.jreHome(context),
-                serverJar = File(s.jarPath),
-                workDir = workDir,
-                serverName = s.serverName,
-                minMemM = s.minMem,
-                maxMemM = s.maxMem,
+                serverJar = serverJar,
+                workDir = serverDir,
+                serverName = meta.name,
+                minMemM = meta.minMemMb,
+                maxMemM = meta.maxMemMb,
                 extraArgs = extraArgs,
-                useSerialGc = s.useSerialGc,
-                keepAlive = s.keepAlive,
+                useSerialGc = meta.useSerialGc,
+                keepAlive = meta.keepAlive,
             ).onFailure { e ->
                 AppLogger.e("LocalHost", "启动本机服务端失败", e)
                 _state.update { it.copy(message = "启动失败：${e.message ?: "详见日志"}", running = false) }

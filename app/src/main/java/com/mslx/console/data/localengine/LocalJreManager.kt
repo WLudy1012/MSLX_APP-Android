@@ -42,7 +42,7 @@ object LocalJreManager {
      * 下载顺序 CNB 首选 → 上游 GitHub 回退。发新版本时同步更新这里的 tag。
      */
     private const val CNB_JRE_MIRROR_BASE =
-        "https://cnb.cool/WLudy/MSLX_APP-Android/-/releases/download/v1.6.3-Beta"
+        "https://cnb.cool/WLudy/MSLX_APP-Android/-/releases/download/v1.6.4-Beta"
 
     /** 某个 ABI 对应的运行时归档：assets 内嵌名 / 下载源（按序尝试）/ 固定 SHA-256。 */
     data class RuntimeSpec(
@@ -93,8 +93,11 @@ object LocalJreManager {
         return context.assets.list(ASSET_DIR).orEmpty().any { it == spec.assetName }
     }
 
-    /** JRE 安装根目录（= java.home）；必须在私有目录（外部存储 noexec 且 dlopen 也不可靠）。 */
-    fun jreHome(context: Context): File = File(context.filesDir, "jre/$RUNTIME_ID")
+    /**
+     * JRE 安装根目录（= java.home）：`<数据目录>/runtime/jre17`（见 [LocalStorage]）。
+     * 必须在应用私有目录（外部存储 noexec，且 dlopen 也不可靠）。
+     */
+    fun jreHome(context: Context): File = LocalStorage.jreHome(context)
 
     /** 进程内 JVM 真正需要的库。 */
     fun libjvmFile(context: Context): File = File(jreHome(context), "lib/server/libjvm.so")

@@ -41,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -276,17 +277,122 @@ fun LocalHostScreen(
 
             Spacer(Modifier.height(12.dp))
 
+            // ---------- 2.5 实例目录与文件（数据目录：filesDir/mslx） ----------
+            Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("服务器目录", style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = viewModel::refreshInstance) { Text("刷新") }
+                    }
+                    Text(
+                        "数据目录：filesDir/mslx/（runtime＝运行时，servers＝实例，cache＝下载缓存）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = state.instancePath.ifBlank { "servers/(未创建)" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    if (state.instanceFiles.isNotEmpty()) {
+                        state.instanceFiles.chunked(2).forEach { row ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                row.forEach { (name, ok) ->
+                                    Text(
+                                        text = (if (ok) "✓ " else "○ ") + name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                if (row.size == 1) Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    } else {
+                        Text(
+                            "下载核心后会自动补全 eula.txt / server.properties / 名单 json / instance.json 等文件（仿 MSLX daemon 创建流程）。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = viewModel::applyInstanceFiles,
+                        enabled = state.jarInstalled,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("按当前配置补全/更新实例文件") }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             // ---------- 3. 服务端配置 ----------
             Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("服务端配置", style = MaterialTheme.typography.titleSmall)
                     OutlinedTextField(
                         value = state.serverName,
-                        onValueChange = { v -> viewModel.update { it.copy(serverName = v) } },
-                        label = { Text("服务器名称") },
+                        onValueChange = { v ->
+                            viewModel.update { it.copy(serverName = v) }
+                            viewModel.refreshInstance()
+                        },
+                        label = { Text("服务器名称（同时作为实例目录名）") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        MemoryInput(
+                            label = "端口",
+                            value = state.serverPort,
+                            onChange = { p -> viewModel.update { s -> s.copy(serverPort = p) } },
+                            modifier = Modifier.weight(1f),
+                        )
+                        MemoryInput(
+                            label = "最大玩家数",
+                            value = state.maxPlayers,
+                            onChange = { p -> viewModel.update { s -> s.copy(maxPlayers = p) } },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    OutlinedTextField(
+                        value = state.motd,
+                        onValueChange = { v -> viewModel.update { it.copy(motd = v) } },
+                        label = { Text("MOTD（服务器列表显示名，留空用实例名）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        DropdownField(
+                            label = "难度",
+                            items = listOf("peaceful", "easy", "normal", "hard"),
+                            selected = state.difficulty,
+                            onSelect = { v -> viewModel.update { it.copy(difficulty = v) } },
+                            enabled = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        DropdownField(
+                            label = "游戏模式",
+                            items = listOf("survival", "creative", "adventure", "spectator"),
+                            selected = state.gamemode,
+                            onSelect = { v -> viewModel.update { it.copy(gamemode = v) } },
+                            enabled = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("正版验证 online-mode", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "开启时仅正版账号可进（手机端自测建议先关闭）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = state.onlineMode,
+                            onCheckedChange = { v -> viewModel.update { it.copy(onlineMode = v) } },
+                        )
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         MemoryInput(
                             label = "最小内存 MB",

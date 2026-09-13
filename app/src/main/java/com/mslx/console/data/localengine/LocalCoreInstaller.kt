@@ -7,8 +7,9 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * 服务端核心安装器：对接 MSLAPI（v4 mirrors/download）获取核心下载信息，
- * 下载到本机世界目录并做 SHA-256 校验（与 daemon 侧创建实例流程同源）。
+ * 服务端核心安装器：对接 MSLAPI（v4 mirrors/download）取核心下载信息，
+ * 下载到**实例目录并统一命名 `server.jar`**（同 daemon 约定），
+ * 随后由 [ServerFiles] 补全实例其余文件（eula / server.properties / 名单 / 元数据）。
  */
 class LocalCoreInstaller(
     private val repository: InstanceRepository,
@@ -28,25 +29,34 @@ class LocalCoreInstaller(
         repository.serverCoreGameVersion(core).getOrNull()?.versions.orEmpty()
 
     /**
-     * 下载核心到 [worldsDir]，返回 jar 文件。
-     * 复用 daemon 创建实例的核心契约：ServerCoreDownloadInfo{url, sha256}。
+     * 下载核心到实例目录 [serverDir]/server.jar（含 SHA-256 校验），
+     * 成功后按 daemon 流程补全实例文件，返回 (核心文件, 实例元数据)。
      */
     suspend fun installCore(
         core: String,
         version: String,
         build: String,
-        worldsDir: File,
+        serverDir: File,
+        meta: LocalInstanceMeta,
         onProgress: (Float) -> Unit = {},
-    ): Result<File> = runCatching {
+    ): Result<Pair<File, LocalInstanceMeta>> = runCatching {
         val info = repository.serverCoreDownloadInfo(core, version, build).getOrNull()
             ?: throw IllegalStateException("MSLAPI 未返回核心下载信息")
         val url = info.url ?: throw IllegalStateException("核心下载地址为空")
-        val safeName = "$core-$version".replace(Regex("[^A-Za-z0-9._-]"), "_")
-        val target = File(worldsDir, "$safeName.jar")
+        serverDir.mkdirs()
+        val target = File(serverDir, ServerFiles.SERVER_JAR_NAME)
         withContext(Dispatchers.IO) {
             LocalDownloader.download(url, target, info.sha256) { onProgress(it) }
         }
-        AppLogger.i("LocalCore", "核心下载完成: $core $version -> ${target.absolutePath}")
-        target
+        AppLogger.i(
+            "LocalCore",
+            "核心下载完成：$core $version → ${target.absolutePath}",
+        )
+        // 补全实例剩余文件（eula/server.properties/名单/目录/instance.json），模仿 daemon 创建流程
+        val finalMeta = ServerFiles.complete(
+            serverDir,
+            meta.copy(core = core, coreVersion = version, coreBuild = build),
+        ).getOrThrow()
+        target to finalMeta
     }
 }

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     MSLX-Android local signed release packer (two variants in one run).
 
@@ -83,10 +83,11 @@ function Build-Variant {
     param([bool]$WithoutJre)
     $label = if ($WithoutJre) { "lite (no embedded JRE)" } else { "full (embedded JRE)" }
     Write-Host "[2/5] Building assembleRelease - $label ..." -ForegroundColor Cyan
-    $args = @(":app:assembleRelease", "--console=plain")
-    if ($VersionName) { $args += "-PversionName=$VersionName" }
-    if ($WithoutJre) { $args += "-PwithoutJre=true" }
-    & $Gradlew @args
+    $gradleArgs = @(":app:assembleRelease", "--console=plain")
+    if ($VersionName) { $gradleArgs += "-PversionName=$VersionName" }
+    if ($WithoutJre) { $gradleArgs += "-PwithoutJre=true" }
+    # Out-Host：Gradle 输出直接打到控制台，绝不能混进函数返回值（否则调用方拿到的是日志数组）
+    & $Gradlew @gradleArgs | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Gradle build failed for $label (exit $LASTEXITCODE)." }
     $apk = Join-Path $Root "app\build\outputs\apk\release\app-release.apk"
     if (-not (Test-Path $apk)) { throw "APK not produced: $apk" }
@@ -94,8 +95,8 @@ function Build-Variant {
 }
 
 function Inspect-Apk {
-    param([string]$Apk, [bool]$ExpectJre)
-    $entries = tar -tf $Apk 2>$null
+    param([string]$ApkPath, [bool]$ExpectJre)
+    $entries = tar -tf $ApkPath 2>$null
     $jreEntry = $entries | Where-Object { $_ -like "assets/jre/*.tar.xz" }
     $soEntry = $entries | Where-Object { $_ -like "lib/*/libmslxvm.so" }
     if ($ExpectJre) {
@@ -129,7 +130,7 @@ $results = @()
 $effVersion = $VersionName
 if ($Only -ne "lite") {
     $fullApk = Build-Variant -WithoutJre $false
-    Inspect-Apk -Apk $fullApk -ExpectJre $true
+    Inspect-Apk -ApkPath $fullApk -ExpectJre $true
     if (-not $effVersion -and $Aapt) {
         $badging = & $Aapt.FullName "dump" "badging" $fullApk 2>$null
         $effVersion = ($badging | Select-String "versionName='([^']*)'" | Select-Object -First 1).Matches[0].Groups[1].Value
@@ -146,7 +147,7 @@ if ($Only -ne "lite") {
 # ---------- Lite variant ----------
 if ($Only -ne "full") {
     $liteApk = Build-Variant -WithoutJre $true
-    Inspect-Apk -Apk $liteApk -ExpectJre $false
+    Inspect-Apk -ApkPath $liteApk -ExpectJre $false
     if (-not $effVersion) {
         if ($Aapt) {
             $badging = & $Aapt.FullName "dump" "badging" $liteApk 2>$null
