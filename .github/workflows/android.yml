@@ -28,8 +28,25 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # 不用 android-actions/setup-android@v3：它在末尾会执行 `sdkmanager tools`，而 Google
+      # 已把 `tools` 包从仓库下架（Warning: Failed to find package 'tools' → exit 1），
+      # runner 镜像换成 cmdline-tools 16.0 后这一步必然失败（v1.6.6-Beta 起 Release/CI 全挂）。
+      # ubuntu 运行器自带 Android SDK（ANDROID_HOME）且许可已在镜像内接受，AGP 会按需补齐
+      # 缺失的 platform / build-tools，所以下面只做容错预热，任何失败都不阻断构建。
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMAN=""
+          for c in "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
+            if [ -x "$c" ]; then SDKMAN="$c"; break; fi
+          done
+          if [ -z "$SDKMAN" ]; then
+            echo "::warning::未找到 sdkmanager，直接使用镜像预装 SDK"
+            exit 0
+          fi
+          yes | "$SDKMAN" --licenses > /dev/null 2>&1 || true
+          "$SDKMAN" "platforms;android-35" "build-tools;35.0.0" platform-tools \
+            || echo "::warning::sdkmanager 预装未完全成功，交由 AGP 自动下载"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
