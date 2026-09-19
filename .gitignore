@@ -20,3 +20,7 @@ ACTIONS_GUIDE.md
 /app/src/main/assets/jre/jre17-x86_64-*
 # 本地归档产物
 /build/dist/
+# 本地开发资料与上游参考（只留本机，不入库）：文档/上游 MSLX-dev 源码/图标素材
+/develops/
+/MSLX-dev/
+/_icons/

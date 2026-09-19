@@ -42,7 +42,7 @@ object LocalJreManager {
      * 下载顺序 CNB 首选 → 上游 GitHub 回退。发新版本时同步更新这里的 tag。
      */
     private const val CNB_JRE_MIRROR_BASE =
-        "https://cnb.cool/WLudy/MSLX_APP-Android/-/releases/download/v1.6.5-Beta"
+        "https://cnb.cool/WLudy/MSLX_APP-Android/-/releases/download/v1.6.6-Beta"
 
     /** 某个 ABI 对应的运行时归档：assets 内嵌名 / 下载源（按序尝试）/ 固定 SHA-256。 */
     data class RuntimeSpec(

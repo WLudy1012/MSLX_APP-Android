@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,10 +74,16 @@ import com.mslx.console.ui.theme.ConsoleTextStyle
 @Composable
 fun LocalHostScreen(
     onBack: () -> Unit,
+    initialDir: String = "",
     viewModel: LocalHostViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // 从服务端总览跳进来时定位到指定实例
+    LaunchedEffect(initialDir) {
+        if (initialDir.isNotBlank()) viewModel.selectInstance(initialDir)
+    }
 
     // Android 13+ 通知权限：即使被拒也只是通知不可见，前台服务照常运行
     val permissionLauncher = rememberLauncherForActivityResult(

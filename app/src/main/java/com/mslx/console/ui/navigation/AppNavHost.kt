@@ -33,6 +33,7 @@ import com.mslx.console.ui.settings.PluginsModsScreen
 import com.mslx.console.ui.settings.ServerPropertiesScreen
 import com.mslx.console.ui.settings.LocalServerSettingsScreen
 import com.mslx.console.ui.settings.SettingsScreen
+import com.mslx.console.ui.servers.ServersOverviewScreen
 import com.mslx.console.ui.settings.AppearanceScreen
 import com.mslx.console.ui.settings.AboutScreen
 import com.mslx.console.ui.settings.LogViewerScreen
@@ -57,8 +58,11 @@ object Routes {
     const val APPEARANCE = "appearance"
     const val ABOUT = "about"
     const val LOGS = "logs"
-    const val LOCAL_SERVER = "localServer"
+    const val LOCAL_SERVER = "localServer?dir={dir}"
     const val LOCAL_SERVER_SETTINGS = "localServerSettings"
+    const val SERVERS = "servers"
+
+    fun localServer(dir: String? = null): String = "localServer?dir=${dir.orEmpty()}"
 
     fun console(instanceId: Long): String = "console/$instanceId"
     fun connect(auto: Boolean, daemonId: String? = null): String =
@@ -244,16 +248,41 @@ fun AppNavHost(
                         navController.navigate(Routes.ABOUT) { launchSingleTop = true }
                     },
                     onOpenLocalServer = {
-                        navController.navigate(Routes.LOCAL_SERVER) { launchSingleTop = true }
+                        navController.navigate(Routes.localServer()) { launchSingleTop = true }
                     },
                     onOpenLocalServerSettings = {
                         navController.navigate(Routes.LOCAL_SERVER_SETTINGS) { launchSingleTop = true }
                     },
+                    onOpenServers = {
+                        navController.navigate(Routes.SERVERS) { launchSingleTop = true }
+                    },
                 )
             }
 
-            composable(Routes.LOCAL_SERVER) {
-                LocalHostScreen(onBack = { navController.popBackStack() })
+            composable(
+                route = Routes.LOCAL_SERVER,
+                arguments = listOf(navArgument("dir") { type = NavType.StringType; defaultValue = "" }),
+            ) { entry ->
+                LocalHostScreen(
+                    onBack = { navController.popBackStack() },
+                    initialDir = entry.arguments?.getString("dir").orEmpty(),
+                )
+            }
+
+            // 服务端总览：多 Daemon 状态 + 本机/各 Daemon 实例统一列表
+            composable(Routes.SERVERS) {
+                ServersOverviewScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenLocalServer = { dir ->
+                        navController.navigate(Routes.localServer(dir.takeIf { it.isNotBlank() })) { launchSingleTop = true }
+                    },
+                    onOpenConsole = { instanceId ->
+                        navController.navigate(Routes.console(instanceId)) { launchSingleTop = true }
+                    },
+                    onOpenCreate = {
+                        navController.navigate(Routes.NEW_INSTANCE) { launchSingleTop = true }
+                    },
+                )
             }
 
             composable(Routes.LOCAL_SERVER_SETTINGS) {

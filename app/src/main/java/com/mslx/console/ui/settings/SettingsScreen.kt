@@ -72,6 +72,7 @@ fun SettingsScreen(
     onOpenAbout: () -> Unit,
     onOpenLocalServer: () -> Unit,
     onOpenLocalServerSettings: () -> Unit,
+    onOpenServers: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -221,6 +222,12 @@ fun SettingsScreen(
                         title = "本地开服设置",
                         subtitle = "内存、JVM 参数、后台保活",
                         onClick = onOpenLocalServerSettings,
+                    )
+                    EntryRow(
+                        icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "服务端总览",
+                        subtitle = "多 Daemon 连接状态 + 本机/云端实例统一管理",
+                        onClick = onOpenServers,
                     )
                 }
             }
