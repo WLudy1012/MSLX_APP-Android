@@ -23,9 +23,9 @@ android {
         applicationId = "com.mslx.console"
         minSdk = 24
         targetSdk = 35
-        versionCode = 32
+        versionCode = 33
         // CI Actions 构建会以 -PversionName=x.x.x.x 覆盖（见 android.yml Compute Actions version）
-        versionName = (project.findProperty("versionName") as String?) ?: "1.6.6"
+        versionName = (project.findProperty("versionName") as String?) ?: "1.7"
 
         ndk {
             // arm64 真机 + x86_64 模拟器（本机开服调试用）
@@ -84,6 +84,13 @@ android {
         compose = true
     }
 
+    lint {
+        // 已知可接受告警（trust-all SSL 仅用于连自建 Daemon、启动图标形状/主题色、
+        // 依赖有新版提示等）已记入 baseline，使 ./gradlew check 可通过并只暴露新增问题。
+        // 重新生成：./gradlew updateLintBaseline
+        baseline = file("lint-baseline.xml")
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -136,6 +143,10 @@ dependencies {
     // 本机开服：解压内嵌 Android JRE（上游 .tar.xz）
     implementation(libs.xz)
     implementation(libs.commons.compress)
+
+    // 本机开服增强：Shizuku/ADB 权限下 exec 真正的 java 子进程
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

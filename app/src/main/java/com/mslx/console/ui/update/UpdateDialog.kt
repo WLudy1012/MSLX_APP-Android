@@ -50,7 +50,9 @@ fun UpdateHost(
     if (update != null) {
         val context = LocalContext.current
         // 当前安装包是否自带内嵌 JRE（决定推荐完整版还是精简版）
-        val currentHasEmbeddedJre = remember(context) { LocalJreManager.hasEmbeddedAsset(context) }
+        val currentHasEmbeddedJre = remember(context) {
+            LocalJreManager.hasEmbeddedAsset(context, LocalJreManager.DEFAULT_RUNTIME)
+        }
         UpdateDialog(
             currentVersion = state.currentVersion,
             update = update,

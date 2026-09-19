@@ -48,6 +48,21 @@ jobs:
           echo "$SHA  $JRE" | sha256sum -c -
           ls -lh "$JRE"
 
+      # Java 21 运行时（Paper 1.20.5+/1.21 需要）不入库、不进 APK，只在发版时从上游
+      # 镜像抓一份挂成 Release 附件。GitHub 侧走“尽力而为”：失败只告警不阻断发布
+      # （下面 files 对不存在的文件会自动跳过），CNB 流水线那边才是硬校验。
+      - name: Fetch JRE 21 runtime archive
+        run: |
+          JRE21=jre21-arm64-20260223-release.tar.xz
+          SHA=d055fc953771e6cfd2206ef770ca675d69b5e4cfd9f3f1e6820ba5820c3cc1dc
+          URL="https://pan.huang1111.cn/f/eWkQI1/$JRE21"
+          if curl -fL --retry 3 --max-time 900 -o "$JRE21" "$URL" && echo "$SHA  $JRE21" | sha256sum -c -; then
+            ls -lh "$JRE21"
+          else
+            rm -f "$JRE21"
+            echo "::warning::获取 jre21 归档失败，本次 Release 将不含该附件（客户端会回退到 FCL 直链）"
+          fi
+
       # 从仓库 Secrets 恢复签名密钥并生成 keystore.properties。
       # 需在仓库 Settings → Secrets and variables → Actions 配置：
       #   KEYSTORE_BASE64   = base64 编码后的 .jks 文件内容
@@ -162,6 +177,8 @@ jobs:
             echo "| \`app-release.apk\` | **完整版**：内嵌 Android JRE 运行时，本机开服可离线使用 | ${FULL_MB} MB | \`$FULL_SHA\` |"
             echo "| \`app-release-lite.apk\` | **精简版**：不含运行时，体积小；本机开服首次使用需联网下载约 36MB 运行时 | ${LITE_MB} MB | \`$LITE_SHA\` |"
             echo ""
+            echo "附件里的 \`jre17-*.tar.xz\` / \`jre21-*.tar.xz\` 是本机开服用的 Android 运行时归档（应用内自动拉取，无需手动安装）。"
+            echo ""
             echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
             echo ""
             echo "校验命令（Windows PowerShell）："
@@ -178,4 +195,5 @@ jobs:
             app-release.apk
             app-release-lite.apk
             app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
+            jre21-arm64-20260223-release.tar.xz
           body_path: release_notes.md

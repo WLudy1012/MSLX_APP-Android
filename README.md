@@ -18,6 +18,7 @@ MSLX 守护程序（MSLX Daemon）的第三方手机安卓端控制台。基于 
 - **实时控制台**：深色终端风格，实时接收服务器日志并支持 **ANSI 原彩显示**；发送命令、自动滚动、清空日志、一键回到最新。
 - **新建实例**：分步向导（基本信息 / 服务端核心 / Java 环境 / 资源配置 / MCDR / 确认），支持 Java 版与基岩版、在线核心库、远程下载、本地上传、整合包。
 - **实例设置**：通用设置、文件管理（浏览/编辑/上传）、插件与模组管理、server.properties 编辑、Java 环境选择。
+- **本机开服**：不依赖 Daemon / Termux，直接在手机上跑 Minecraft Java 版服务端（进程内 JVM，可选 Shizuku 增强为真 java 子进程），多 Java 运行时、常驻通知保活、控制台交互。详见[本机开服](#-本机开服在手机上开服)。
 - **用户中心**：查看/编辑当前用户信息、一键复制 API Key；管理员可进行用户管理（创建/编辑/删除）。
 - **主页仪表盘**：Daemon CPU / 内存负载监视（SignalR 实时推送）、系统信息、实例概览、开服/关服通知。
 - **软件自动更新**：启动检测 + 设置页手动检查；支持**稳定版 / 测试版（Beta）双更新渠道**与 **Actions 调试构建渠道**（应用内下载安装 CI 最新 debug APK）；强制更新版本不可跳过。
@@ -37,6 +38,7 @@ app/src/main/java/com/mslx/console/
 │   ├── SettingsStore.kt      # DataStore 持久化（多 Daemon/主题/更新渠道）
 │   ├── CryptoManager.kt      # AndroidKeyStore AES-GCM 加密
 │   ├── AppLogger.kt          # 全应用日志（1MB 轮转 + 脱敏 + 崩溃标记）
+│   ├── localengine/          # 本机开服引擎（JRE 管理/双引擎/实例文件）
 │   └── AppContainer.kt       # 手动依赖注入容器
 └── ui/                       # 界面层
     ├── connect/              # 连接守护程序
@@ -67,6 +69,9 @@ app/src/main/java/com/mslx/console/
 | SignalR Java Client | 8.0.8 |
 | DataStore Preferences | 1.1.1 |
 | Coil Compose | 2.7.0 |
+| XZ / Commons-Compress（解包 JRE） | 1.10 / 1.27.1 |
+| Shizuku（本机开服增强） | 13.1.5 |
+| NDK（进程内 JVM 桥接） | 28.2.13676358 |
 
 ## 🛠 编译
 
@@ -85,6 +90,34 @@ app/src/main/java/com/mslx/console/
      （Windows 可用 `ipconfig`、Linux/macOS 可用 `ip addr` 查询；Docker 部署填映射后的端口）。
    - **API Key**：守护程序的 API Key。
 4. 点击「连接」进入实例列表；点任意实例进入控制台，即可查看日志、发送命令、启停实例。
+
+## 📱 本机开服（在手机上开服）
+
+新建实例时选「本机」目标，服务端就跑在手机自身的私有目录（`files/mslx/servers/<实例>`）里，
+无需 Daemon、无需 Termux/proot。入口：「设置 → 本机开服」与「设置 → 本地开服设置」。
+
+- **两种引擎**：
+  - **基线（进程内 JVM）**：NDK `dlopen libjvm.so` + `JNI_CreateJavaVM`，无需任何授权；
+    受 Android 限制，一个进程只能创建一个 JVM，停止后需重启 App 才能再起。
+  - **增强模式（Shizuku / ADB）**：以 shell 权限 exec 真正的 `java` 子进程，可多实例并发、
+    可原地重启、可跨 Java 版本。未授权时启动会自动回退到基线引擎。
+- **Java 运行时**（设置页可装多个并逐实例选择）：
+
+  | 运行时 | 来源 | 分发方式 |
+  | --- | --- | --- |
+  | Java 17 | PojavLauncher `jre17-ec28559`（Android/bionic） | **内嵌在完整版 APK**，可离线安装 |
+  | Java 21 | FCL 下载站 `jre21-arm64-20260223`（Android/bionic） | 应用内下载，SHA-256 固定 |
+  | Java 8 | — | **暂无 Android 构建**（上游只有 iOS/macOS 产物），UI 标为不可用 |
+
+  下载源按「CNB 镜像 → GitHub Release → 上游直链」依次回退；精简版 APK 不内嵌运行时，
+  首次开服需联网下载约 36MB。
+- **版本匹配守卫**：1.17–1.20.4 用 Java 17，1.20.5+ 用 Java 21；运行时低于核心要求时启动会被
+  直接拦下并给出可执行的提示（而不是刷一堆看不懂的 JVM 报错）。
+- **保活**：前台服务 + 常驻通知，退到后台/划掉最近任务仍继续运行（通知栏可停）。
+
+开发者相关：`fetch-jre-assets.ps1` 拉内嵌的 jre17（`-Jre21` 取仅作 Release 附件的 jre21）；
+`build-shim.ps1` 重编 `LD_PRELOAD` 垫片（关 Scudo 堆打标签，否则旧 OpenJDK 在 Android 12+ 必
+SIGABRT）；两者的细节注释在 `app/src/main/cpp/shim/mslxnotag.c` 与 `LocalJreManager.kt`。
 
 ## ⚠️ 安全与注意事项
 

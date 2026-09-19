@@ -59,4 +59,31 @@ class LocalCoreInstaller(
         ).getOrThrow()
         target to finalMeta
     }
+
+    /**
+     * 从已解析的下载地址 [url]（+ 可选 [sha256]）下载核心到 [serverDir]/server.jar，
+     * 供创建向导「本机」目标复用 MSLAPI 核心选择器已拿到的下载信息（无需按 build 再解析一次）。
+     */
+    suspend fun installFromUrl(
+        url: String,
+        sha256: String,
+        core: String,
+        version: String,
+        serverDir: File,
+        meta: LocalInstanceMeta,
+        onProgress: (Float) -> Unit = {},
+    ): Result<Pair<File, LocalInstanceMeta>> = runCatching {
+        if (url.isBlank()) throw IllegalStateException("核心下载地址为空")
+        serverDir.mkdirs()
+        val target = File(serverDir, ServerFiles.SERVER_JAR_NAME)
+        withContext(Dispatchers.IO) {
+            LocalDownloader.download(url, target, sha256.ifBlank { null }) { onProgress(it) }
+        }
+        AppLogger.i("LocalCore", "核心下载完成（URL）：$core $version → ${target.absolutePath}")
+        val finalMeta = ServerFiles.complete(
+            serverDir,
+            meta.copy(core = core, coreVersion = version),
+        ).getOrThrow()
+        target to finalMeta
+    }
 }

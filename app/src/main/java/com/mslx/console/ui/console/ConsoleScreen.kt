@@ -1,6 +1,5 @@
 package com.mslx.console.ui.console
 
-import android.app.Application
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -63,11 +62,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
 import com.mslx.console.ui.StatusBadge
 import com.mslx.console.ui.theme.ConsoleBackground
 import com.mslx.console.ui.theme.ConsoleSystem
@@ -78,19 +73,11 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConsoleScreen(
-    instanceId: Long,
+    controller: ConsoleController,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val viewModel: ConsoleViewModel = viewModel(
-        key = "console_$instanceId",
-        factory = viewModelFactory {
-            initializer {
-                val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
-                ConsoleViewModel(app, instanceId)
-            }
-        },
-    )
+    val viewModel = controller
 
     val state by viewModel.state.collectAsStateWithLifecycle()
     val logs by viewModel.logs.collectAsStateWithLifecycle()

@@ -12,7 +12,7 @@ main:
         - name: verify embedded jre runtime
           script: |
             set -eu
-            JRE=app/src/main/assets/jre/jre17-arm64-20210825-release.tar.xz
+            JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
             SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
             [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
             echo "$SHA  $JRE" | sha256sum -c -
@@ -57,6 +57,26 @@ $:
             SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
             [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
             echo "$SHA  $JRE" | sha256sum -c -
+
+        # Java 21 运行时（Paper 1.20.5+/1.21 需要）不入库、不进 APK，只在发版时抓下来
+        # 作为 Release 附件，供客户端按「CNB → GitHub → FCL」顺序下载。
+        # 这里故意硬失败：下面的 attachments 是静态列表，缺文件会让上传步骤整体报错，
+        # 早失败比“APK 已签名但附件没传上”更容易发现与重跑。
+        - name: fetch jre21 runtime archive
+          script: |
+            set -eu
+            JRE21=jre21-arm64-20260223-release.tar.xz
+            SHA=d055fc953771e6cfd2206ef770ca675d69b5e4cfd9f3f1e6820ba5820c3cc1dc
+            URL="https://pan.huang1111.cn/f/eWkQI1/$JRE21"
+            ok=0
+            for i in 1 2 3; do
+              echo "下载 $URL（第 $i 次）"
+              if curl -fL --retry 2 --max-time 900 -o "$JRE21" "$URL"; then ok=1; break; fi
+              sleep 5
+            done
+            [ "$ok" = "1" ] || { echo "ERROR: 获取 jre21 归档失败（上游镜像不可用？）" >&2; exit 1; }
+            echo "$SHA  $JRE21" | sha256sum -c -
+            ls -lh "$JRE21"
 
         # 同一 Release 发布两个变体：app-release.apk（完整版，内嵌 JRE）与
         # app-release-lite.apk（精简版，不含 JRE）；JRE 归档本身也作为附件，
@@ -119,6 +139,8 @@ $:
               echo "| \`app-release.apk\` | **完整版**：内嵌 Android JRE 运行时，本机开服可离线使用 | $(du -m app-release.apk | awk '{print $1}') MB | \`$(sha256sum app-release.apk | awk '{print $1}')\` |"
               echo "| \`app-release-lite.apk\` | **精简版**：不含运行时，体积小；本机开服首次使用需联网下载约 36MB 运行时 | $(du -m app-release-lite.apk | awk '{print $1}') MB | \`$(sha256sum app-release-lite.apk | awk '{print $1}')\` |"
               echo ""
+              echo "附件里的 \`jre17-\*.tar.xz\` / \`jre21-\*.tar.xz\` 是本机开服用的 Android 运行时归档（应用内自动拉取，无需手动安装）。"
+              echo ""
               echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
             } > CNB_RELEASE.md
 
@@ -135,3 +157,4 @@ $:
               - app-release.apk
               - app-release-lite.apk
               - app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
+              - jre21-arm64-20260223-release.tar.xz

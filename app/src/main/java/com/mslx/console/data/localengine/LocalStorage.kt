@@ -39,8 +39,11 @@ object LocalStorage {
     /** 运行时根目录（对应 daemon 的 Tools/Java）。 */
     fun runtimeDir(context: Context): File = File(root(context), "runtime")
 
-    /** JRE 安装目录（= java.home）。 */
-    fun jreHome(context: Context): File = File(runtimeDir(context), LocalJreManager.RUNTIME_ID)
+    /** 指定运行时的 JRE 安装目录（= java.home 根）：`runtime/<runtimeId>`（如 jre8/jre17/jre21）。 */
+    fun jreHome(context: Context, runtimeId: String): File = File(runtimeDir(context), runtimeId)
+
+    /** 默认运行时（jre17）的 JRE 安装目录。 */
+    fun jreHome(context: Context): File = jreHome(context, LocalJreManager.RUNTIME_ID)
 
     /** 实例根目录（对应 daemon 的 Servers）。 */
     fun serversDir(context: Context): File = File(root(context), "servers")

@@ -83,6 +83,7 @@ fun CreateInstanceScreen(
     onOpenInstances: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenConsole: (Long) -> Unit,
+    onOpenLocalConsole: (String) -> Unit,
     viewModel: CreateInstanceViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -131,12 +132,19 @@ fun CreateInstanceScreen(
         ) {
             when {
                 state.success -> SuccessContent(
-                    serverId = state.createdServerId,
+                    serverId = if (state.target == "local") state.createdDirName else state.createdServerId,
+                    isLocal = state.target == "local",
                     onOpenConsole = {
-                        val id = state.createdServerId.toLongOrNull() ?: 0L
                         // 离开创建页前重置表单，避免下次进入仍停留在成功页/残留旧数据
-                        viewModel.reset()
-                        onOpenConsole(id)
+                        if (state.target == "local") {
+                            val dir = state.createdDirName
+                            viewModel.reset()
+                            onOpenLocalConsole(dir)
+                        } else {
+                            val id = state.createdServerId.toLongOrNull() ?: 0L
+                            viewModel.reset()
+                            onOpenConsole(id)
+                        }
                     },
                     onReset = viewModel::reset,
                     onBackToList = {
@@ -158,6 +166,8 @@ fun CreateInstanceScreen(
                 else -> FormContent(
                     state = state,
                     onUpdate = viewModel::update,
+                    onTargetChange = viewModel::setTarget,
+                    onSelectLocalRuntime = viewModel::selectLocalRuntime,
                     onModeChange = viewModel::setMode,
                     onNext = viewModel::nextStep,
                     onPrev = viewModel::prevStep,
@@ -212,6 +222,8 @@ private val MODES = listOf(
 private fun FormContent(
     state: CreateInstanceUiState,
     onUpdate: ((CreateInstanceUiState) -> CreateInstanceUiState) -> Unit,
+    onTargetChange: (String) -> Unit,
+    onSelectLocalRuntime: (String) -> Unit,
     onModeChange: (Int) -> Unit,
     onNext: () -> Unit,
     onPrev: () -> Unit,
@@ -225,10 +237,22 @@ private fun FormContent(
 ) {
     val steps = wizardSteps(state.mode)
     val current = steps.getOrNull(state.step)
+    val isLocal = state.target == "local"
+    // 本机目标仅支持 Java 核心：只保留快速/自定义
+    val visibleModes = if (isLocal) MODES.filter { (v, _) -> v == 1 || v == 10 } else MODES
     Column(modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        // 创建目标：Daemon / 本机
+        Text("创建目标", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("daemon" to "远程 Daemon", "local" to "本机").forEach { (value, label) ->
+                FilterChip(selected = state.target == value, onClick = { onTargetChange(value) }, label = { Text(label) })
+            }
+        }
+        Spacer(Modifier.height(12.dp))
         // 模式选择
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MODES.forEach { (value, label) ->
+            visibleModes.forEach { (value, label) ->
                 FilterChip(selected = state.mode == value, onClick = { onModeChange(value) }, label = { Text(label) })
             }
         }
@@ -244,13 +268,16 @@ private fun FormContent(
                     .togetherWith(fadeOut(tween(120)) + slideOutHorizontally(tween(120)) { -it / 8 })
             },
             label = "stepContent",
-        ) { _ ->
+        ) { targetStep ->
+            // 必须使用 AnimatedContent 传入的 targetStep（而非外层的 current），
+            // 否则退场/入场两个面板会渲染同一份新内容，步骤切换动画失效。
+            val paneStep = steps.getOrNull(targetStep)
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                when (current?.key) {
+                when (paneStep?.key) {
                     "basic" -> BasicStep(state, onUpdate)
                     "core" -> CoreStep(state, onUpdate, onOpenCoreSelector, onClearCore, onRemoveUpload, onPickJar)
                     "package" -> PackageStep(state, onUpdate, onOpenCoreSelector, onClearCore, onPickPackage)
-                    "java" -> JavaStep(state, onUpdate)
+                    "java" -> JavaStep(state, onUpdate, onSelectLocalRuntime)
                     "mcdr" -> McdrStep(state, onUpdate)
                     "resource" -> ResourceStep(state, onUpdate)
                     "confirm" -> ConfirmStep(state)
@@ -295,14 +322,19 @@ private fun BasicStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanceUi
     SectionCard("基本信息") {
         OutlinedTextField(value = state.name, onValueChange = { v -> onUpdate { it.copy(name = v) } }, label = { Text("实例名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(value = state.path, onValueChange = { v -> onUpdate { it.copy(path = v) } }, label = { Text("实例路径（选填，Daemon 上的绝对路径）") }, placeholder = { Text("例如: /home/user/下载/") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(6.dp))
-        Text("留空时默认创建在 Daemon 数据目录下的 Server 文件夹中", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(6.dp))
-        Text("常用 Daemon 路径", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("/home/user/下载/", "/home/user/", "/opt/servers/").forEach { path ->
-                FilterChip(selected = state.path == path, onClick = { onUpdate { it.copy(path = path) } }, label = { Text(path) })
+        if (state.target == "local") {
+            // 本机实例目录由名称自动派生（私有数据目录 servers/<名称>），无需 Daemon 绝对路径
+            Text("本机实例将创建在应用私有目录的 servers/ 下，目录名由实例名称自动生成，无需填写路径。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            OutlinedTextField(value = state.path, onValueChange = { v -> onUpdate { it.copy(path = v) } }, label = { Text("实例路径（选填，Daemon 上的绝对路径）") }, placeholder = { Text("例如: /home/user/下载/") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(6.dp))
+            Text("留空时默认创建在 Daemon 数据目录下的 Server 文件夹中", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+            Text("常用 Daemon 路径", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("/home/user/下载/", "/home/user/", "/opt/servers/").forEach { path ->
+                    FilterChip(selected = state.path == path, onClick = { onUpdate { it.copy(path = path) } }, label = { Text(path) })
+                }
             }
         }
     }
@@ -320,12 +352,16 @@ private fun CoreStep(
     onPickJar: () -> Unit,
 ) {
     SectionCard("服务端核心") {
-        if (state.mode != 3) {
+        if (state.mode != 3 && state.target != "local") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("online" to "在线下载", "manual" to "本地上传", "custom" to "自定义文件名").forEach { (value, label) ->
                     FilterChip(selected = state.downloadType == value, onClick = { onUpdate { it.copy(downloadType = value) } }, label = { Text(label) })
                 }
             }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (state.target == "local") {
+            Text("本机开服仅支持 MSLAPI 在线核心，下载后经 SHA-256 校验落地到私有目录。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
         }
         if (state.mode == 3) {
@@ -401,9 +437,35 @@ private fun PackageStep(state: CreateInstanceUiState, onUpdate: ((CreateInstance
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun JavaStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanceUiState) -> CreateInstanceUiState) -> Unit) {
-    var pending by remember { mutableStateOf<PendingJava?>(null) }
+private fun JavaStep(
+    state: CreateInstanceUiState,
+    onUpdate: ((CreateInstanceUiState) -> CreateInstanceUiState) -> Unit,
+    onSelectLocalRuntime: (String) -> Unit,
+) {
     val recommended = recommendedJavaFor(state.onlineGameVersion)
+    if (state.target == "local") {
+        SectionCard("Java 运行时（本机）") {
+            recommended?.let { Text("当前核心建议使用 Java $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+            Spacer(Modifier.height(6.dp))
+            if (state.localRuntimes.isEmpty()) {
+                Text("当前设备 ABI 无可用本机运行时。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.localRuntimes.forEach { rt ->
+                        FilterChip(
+                            selected = state.selectedRuntimeId == rt.id,
+                            onClick = { onSelectLocalRuntime(rt.id) },
+                            label = { Text("${rt.label}${if (rt.installed) "" else " · 未安装"}") },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text("未安装的运行时请到「设置 → 本地开服设置」安装；启动时会自动校验。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        return
+    }
+    var pending by remember { mutableStateOf<PendingJava?>(null) }
     SectionCard("Java 环境") {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("online" to "在线下载", "local" to "电脑上的 Java", "env" to "环境变量", "custom" to "自定义路径", "docker" to "Docker").forEach { (value, label) -> FilterChip(state.javaType == value, { onUpdate { it.copy(javaType = value) } }, label = { Text(label) }) }
@@ -502,9 +564,15 @@ private fun ResourceStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanc
 
 @Composable
 private fun ConfirmStep(state: CreateInstanceUiState) {
+    val isLocal = state.target == "local"
     SectionCard("确认信息") {
+        SummaryRow("创建目标", if (isLocal) "本机" else "远程 Daemon")
         SummaryRow("实例名称", state.name)
-        SummaryRow("实例路径", state.path.ifBlank { "默认路径（Daemon 数据目录/Server）" })
+        if (isLocal) {
+            SummaryRow("实例目录", "本机私有目录 (mslx/servers)")
+        } else {
+            SummaryRow("实例路径", state.path.ifBlank { "默认路径（Daemon 数据目录/Server）" })
+        }
         if (state.mode == 3) {
             SummaryRow("服务端核心", state.core.ifBlank { "基岩版核心" })
         } else {
@@ -520,7 +588,12 @@ private fun ConfirmStep(state: CreateInstanceUiState) {
             SummaryRow("整合包", pkg)
         }
         if (state.mode != 3) {
-            SummaryRow("Java 环境", javaDisplay(state))
+            if (isLocal) {
+                val rt = state.localRuntimes.firstOrNull { it.id == state.selectedRuntimeId }
+                SummaryRow("Java 运行时", rt?.let { "${it.label}${if (it.installed) "（已安装）" else "（未安装）"}" } ?: state.selectedRuntimeId)
+            } else {
+                SummaryRow("Java 环境", javaDisplay(state))
+            }
         }
         if (state.mode == 4) {
             SummaryRow("MCDR Python", state.mcdrPython)
@@ -694,6 +767,7 @@ private fun CreatingContent(
 @Composable
 private fun SuccessContent(
     serverId: String,
+    isLocal: Boolean,
     onOpenConsole: () -> Unit,
     onReset: () -> Unit,
     onBackToList: () -> Unit,
@@ -702,7 +776,7 @@ private fun SuccessContent(
     Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Text("🎉 创建成功", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        Text("服务器 ($serverId) 已创建成功", style = MaterialTheme.typography.bodyMedium)
+        Text(if (isLocal) "本机实例「$serverId」已创建成功" else "服务器 ($serverId) 已创建成功", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(24.dp))
         Button(onClick = onOpenConsole, modifier = Modifier.fillMaxWidth()) { Text("进入控制台") }
         Spacer(Modifier.height(8.dp))

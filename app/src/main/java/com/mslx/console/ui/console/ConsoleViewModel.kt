@@ -43,18 +43,18 @@ data class ConsoleUiState(
 class ConsoleViewModel(
     application: Application,
     private val instanceId: Long,
-) : AndroidViewModel(application) {
+) : AndroidViewModel(application), ConsoleController {
 
     private val repository = getApplication<MSLXApplication>().container.instanceRepository
 
     private val _state = MutableStateFlow(ConsoleUiState(instanceName = "实例 #$instanceId"))
-    val state = _state.asStateFlow()
+    override val state = _state.asStateFlow()
 
     private val _logs = MutableStateFlow<List<LogLine>>(emptyList())
-    val logs = _logs.asStateFlow()
+    override val logs = _logs.asStateFlow()
 
     private val _events = MutableSharedFlow<ConsoleEvent>(extraBufferCapacity = 16)
-    val events = _events.asSharedFlow()
+    override val events = _events.asSharedFlow()
 
     private var client: ConsoleHubClient? = null
 
@@ -143,13 +143,13 @@ class ConsoleViewModel(
         }
     }
 
-    fun retryConnect() {
+    override fun retryConnect() {
         if (_state.value.connecting || _state.value.connected) return
         _state.update { it.copy(connecting = true, connectionError = null) }
         viewModelScope.launch { connectHub() }
     }
 
-    fun sendCommand(command: String) {
+    override fun sendCommand(command: String) {
         val cmd = command.trim()
         if (cmd.isEmpty()) return
         appendLogs(listOf(LogLine("> $cmd")))
@@ -160,7 +160,7 @@ class ConsoleViewModel(
         }
     }
 
-    fun sendAction(action: String) {
+    override fun sendAction(action: String) {
         if (_state.value.busy) return
         _state.update { it.copy(busy = true) }
         viewModelScope.launch {
@@ -189,7 +189,7 @@ class ConsoleViewModel(
         runCatching { repository.saveFileContent(instanceId, eulaPath, EULA_AGREED_CONTENT) }
     }
 
-    fun agreeEulaAndStart() {
+    override fun agreeEulaAndStart() {
         viewModelScope.launch {
             // 先尝试让守护进程记录 EULA 同意（失败不阻断，随后 start 本身会给出结果）
             repository.sendAction(instanceId, "agreeEula?true")
@@ -204,7 +204,7 @@ class ConsoleViewModel(
         }
     }
 
-    fun clearLogs() {
+    override fun clearLogs() {
         _logs.value = emptyList()
     }
 

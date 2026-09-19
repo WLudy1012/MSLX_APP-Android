@@ -31,6 +31,25 @@
 
 typedef jint (*CreateJavaVM_t)(JavaVM **pvm, void **penv, void *args);
 
+/* bionic 的 mallopt 扩展选项：切换本进程堆指针打标签级别（Scudo 专有，API 31+）。
+   mallopt 在低版本 NDK 的 libc 桩里未导出（直接引用会 undefined symbol），
+   故运行时从已加载的 libc 里取符号；取不到就跳过。 */
+
+#ifndef M_BIONIC_SET_HEAP_TAGGING_LEVEL
+#define M_BIONIC_SET_HEAP_TAGGING_LEVEL (-204)
+#endif
+#ifndef M_HEAP_TAGGING_LEVEL_NONE
+#define M_HEAP_TAGGING_LEVEL_NONE 0
+#endif
+
+typedef int (*mallopt_t)(int, int);
+
+static int mslx_disable_heap_tagging(void) {
+    mallopt_t opt = (mallopt_t) dlsym(RTLD_DEFAULT, "mallopt");
+    if (opt == NULL) return -1;
+    return opt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE);
+}
+
 static JavaVM *g_vm = NULL;
 static void *g_jvmHandle = NULL;
 
@@ -83,6 +102,13 @@ Java_com_mslx_console_localengine_NativeVm_createJvm(JNIEnv *env, jclass clazz,
         LOGE("null path");
         return -1;
     }
+
+    /* Android 12+ 的 Scudo 给堆指针打上 top-byte tag 并在 free() 校验标签，而旧版 OpenJDK
+       （如 PojavLauncher 2021 的 jre17 构建）内部会截断指针高位，于是进程内 JVM 同样会
+       "Pointer tag ... was truncated" → SIGABRT（真机实测连 keytool 都跑不完）。
+       创建 VM 前关掉本进程的堆打标签；不支持该选项的系统无副作用。
+       代价：本进程失去 MTE/tag 这层内存安全缓解，仅在本机开服时生效。 */
+    LOGI("disable heap tagging: mallopt=%d", mslx_disable_heap_tagging());
 
     /* libjvm 的依赖库（libjava/libjli/...）在 jre/lib 与 jre/lib/server 下 */
     char libPath[4096];

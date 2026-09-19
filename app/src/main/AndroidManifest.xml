@@ -9,6 +9,8 @@
     <!-- 本机开服：前台服务保活（常驻通知），避免退到后台/任务被划掉时服务端掉线 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 本机开服增强：Shizuku（ADB/root 权限）下 exec 真正的 java 子进程 -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
     <!--
         usesCleartextTraffic=true：系统层允许明文，但业务层默认仍强制 HTTPS
@@ -58,6 +60,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Shizuku：应用启动时经此 provider 与 Shizuku 服务绑定（本机开服增强模式 exec java） -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 
 </manifest>

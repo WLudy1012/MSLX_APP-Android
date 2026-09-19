@@ -34,6 +34,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -277,7 +278,7 @@ fun ConnectScreen(
 
     // 允许 HTTP 明文连接警告（5 秒倒计时后可确认）
     if (showHttpWarning) {
-        var countdown by remember { mutableStateOf(5) }
+        var countdown by remember { mutableIntStateOf(5) }
         LaunchedEffect(Unit) {
             while (countdown > 0) {
                 kotlinx.coroutines.delay(1000)

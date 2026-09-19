@@ -52,7 +52,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mslx.console.data.model.InstanceSummary
+import com.mslx.console.data.ManagedServer
 import com.mslx.console.ui.StatusBadge
 import com.mslx.console.ui.StatusDot
 import com.mslx.console.ui.statusColor
@@ -64,10 +64,11 @@ fun InstancesScreen(
     onOpenSettings: () -> Unit,
     onOpenNewInstance: () -> Unit,
     onOpenInstance: (Long) -> Unit,
+    onOpenLocalInstance: (String) -> Unit,
     viewModel: InstancesViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var pendingDelete by remember { mutableStateOf<InstanceSummary?>(null) }
+    var pendingDelete by remember { mutableStateOf<ManagedServer?>(null) }
 
     // 每次回到本页(如新建实例完成后返回)时刷新实例列表
     LifecycleResumeEffect(Unit) {
@@ -95,7 +96,7 @@ fun InstancesScreen(
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
 
-                state.error != null && state.instances.isEmpty() -> {
+                state.error != null && state.servers.isEmpty() -> {
                     Column(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -122,7 +123,7 @@ fun InstancesScreen(
                     }
                 }
 
-                state.instances.isEmpty() -> {
+                state.servers.isEmpty() -> {
                     Column(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -138,10 +139,14 @@ fun InstancesScreen(
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "先在电脑端的 MSLX 面板创建一个实例",
+                            text = "点「新建」创建云端或本机实例（本机实例直接在手机上开服）",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Spacer(Modifier.height(16.dp))
+                        FilledTonalButton(onClick = onOpenNewInstance) {
+                            Text("新建实例")
+                        }
                     }
                 }
 
@@ -158,11 +163,17 @@ fun InstancesScreen(
                             ),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            items(state.instances, key = { it.id }) { instance ->
+                            items(state.servers, key = { it.key }) { server ->
                                 InstanceCard(
-                                    instance = instance,
-                                    onClick = { onOpenInstance(instance.id) },
-                                    onDelete = { pendingDelete = instance },
+                                    server = server,
+                                    onClick = {
+                                        if (server.isLocal) {
+                                            server.localDirName?.let(onOpenLocalInstance)
+                                        } else {
+                                            server.remoteId?.let(onOpenInstance)
+                                        }
+                                    },
+                                    onDelete = { pendingDelete = server },
                                     modifier = Modifier.animateItem(),
                                 )
                             }
@@ -173,19 +184,20 @@ fun InstancesScreen(
         }
     }
     pendingDelete?.let { target ->
-        var confirmation by remember(target.id) { mutableStateOf("") }
-        var deleteFiles by remember(target.id) { mutableStateOf(false) }
+        val displayName = target.name
+        var confirmation by remember(target.key) { mutableStateOf("") }
+        var deleteFiles by remember(target.key) { mutableStateOf(false) }
         val deleteError = state.deleteError
         AlertDialog(
             onDismissRequest = { if (!state.deleting) pendingDelete = null },
             title = { Text("删除实例") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("请输入实例名 ${target.name ?: "实例 #${target.id}"} 以确认删除。")
+                    Text("请输入实例名 $displayName 以确认删除。")
                     OutlinedTextField(confirmation, { confirmation = it }, label = { Text("实例名") }, singleLine = true)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(deleteFiles, { deleteFiles = it })
-                        Text("同时删除磁盘上的服务端数据文件")
+                        Text(if (target.isLocal) "同时删除本机上的服务端数据文件（含世界存档）" else "同时删除磁盘上的服务端数据文件")
                     }
                     if (!deleteError.isNullOrBlank()) {
                         Text(
@@ -198,7 +210,7 @@ fun InstancesScreen(
             },
             confirmButton = {
                 TextButton(
-                    enabled = !state.deleting && confirmation == (target.name ?: "实例 #${target.id}"),
+                    enabled = !state.deleting && confirmation == displayName,
                     onClick = { viewModel.delete(target, deleteFiles) { pendingDelete = null } },
                 ) { Text(if (state.deleting) "删除中..." else "删除") }
             },
@@ -227,11 +239,12 @@ private fun EmptyIcon() {
 
 @Composable
 private fun InstanceCard(
-    instance: InstanceSummary,
+    server: ManagedServer,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val statusCode = if (server.running) 2 else 0
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(18.dp),
@@ -251,15 +264,15 @@ private fun InstanceCard(
                 modifier = Modifier
                     .size(46.dp)
                     .clip(RoundedCornerShape(13.dp))
-                    .background(statusColor(instance.status).copy(alpha = 0.16f)),
+                    .background(statusColor(statusCode).copy(alpha = 0.16f)),
                 contentAlignment = Alignment.Center,
             ) {
-                StatusDot(instance.status)
+                StatusDot(statusCode)
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = instance.name ?: "实例 #${instance.id}",
+                    text = server.name,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -267,12 +280,14 @@ private fun InstanceCard(
                 )
                 Spacer(Modifier.height(7.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusBadge(status = instance.status, statusText = instance.statusText)
+                    StatusBadge(status = statusCode, statusText = if (server.running) "运行中" else "未启动")
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        text = "${instance.extra?.onlinePlayers ?: 0} 人在线",
+                        text = "[${server.sourceLabel}]" + server.detail.ifBlank { "" }.let { if (it.isBlank()) "" else " $it" },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -280,7 +295,7 @@ private fun InstanceCard(
                 Icon(Icons.Filled.Delete, contentDescription = "删除实例", tint = MaterialTheme.colorScheme.error)
             }
             Icon(
-                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )

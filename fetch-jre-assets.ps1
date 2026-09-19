@@ -1,11 +1,15 @@
-﻿<#
+<#
 .SYNOPSIS
-    Fetch the embedded Android JRE runtime archives into app assets.
+    Fetch the Android JRE runtime archives used by 本机开服.
 
 .DESCRIPTION
-    The JRE is NOT stored in git (36MB per ABI). This script downloads the
-    upstream PojavLauncher Android OpenJDK 17 archives into
-    app\src\main\assets\jre\ so Gradle can package them into the APK.
+    两个归档的角色不同：
+
+    * jre17（内嵌）——不入 git（~36MB/ABI），本脚本下载到
+      app\src\jreRuntime\assets\jre\，由 Gradle 打进完整版 APK（-PwithoutJre=true 时不打）。
+    * jre21（仅镜像分发）——**不进 APK 也不入 git**，用 -Jre21 下到 build\，
+      供 CI（.cnb.yml / .github/workflows/release.yml）作为 Release 附件挂载；
+      客户端按「CNB → GitHub → FCL 直链」顺序下载（见 LocalJreManager.JRE21）。
 
     arm64-v8a is the shipped default; pass -IncludeX86_64 to also embed the
     x86_64 build (used by the PC emulator).
@@ -13,10 +17,12 @@
 .EXAMPLE
     .\fetch-jre-assets.ps1
     .\fetch-jre-assets.ps1 -IncludeX86_64
+    .\fetch-jre-assets.ps1 -Jre21        # 只拿 jre21 到 build\（发布镜像用）
 #>
 [CmdletBinding()]
 param(
     [switch]$IncludeX86_64,
+    [switch]$Jre21,
     [string]$Proxy = "http://127.0.0.1:7897",
     [switch]$NoProxy
 )
@@ -36,6 +42,27 @@ if ($IncludeX86_64) {
 
 $req = @{ UseBasicParsing = $true; Headers = @{ 'User-Agent' = 'mslx-android-build' }; TimeoutSec = 600 }
 if (-not $NoProxy -and $Proxy) { $req.Proxy = $Proxy }
+
+# jre21：仅作为 Release 附件，下到 build\（不进 assets、不入 git）。
+if ($Jre21) {
+    $buildDir = Join-Path $Root "build"
+    New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+    $n21 = "jre21-arm64-20260223-release.tar.xz"
+    $t21 = Join-Path $buildDir $n21
+    $s21 = "d055fc953771e6cfd2206ef770ca675d69b5e4cfd9f3f1e6820ba5820c3cc1dc"
+    if (Test-Path $t21) {
+        $have = (Get-FileHash -Algorithm SHA256 $t21).Hash.ToLowerInvariant()
+        if ($have -eq $s21) { Write-Host "[skip] $n21 already present and verified" -ForegroundColor DarkGray; return }
+        Remove-Item $t21 -Force
+    }
+    Write-Host "[get ] $n21 ..." -ForegroundColor Cyan
+    Invoke-WebRequest -Uri "https://pan.huang1111.cn/f/eWkQI1/$n21" -OutFile $t21 @req
+    $got = (Get-FileHash -Algorithm SHA256 $t21).Hash.ToLowerInvariant()
+    if ($got -ne $s21) { Remove-Item $t21 -Force; throw "SHA-256 mismatch for ${n21}: got $got" }
+    Write-Host "       ok  $([math]::Round((Get-Item $t21).Length/1MB,1))MB  $got" -ForegroundColor Green
+    Write-Host "jre21 ready: $t21（只用于 Release 附件，勿放进 assets）" -ForegroundColor Green
+    return
+}
 
 foreach ($a in $Assets) {
     $target = Join-Path $Dest $a.name

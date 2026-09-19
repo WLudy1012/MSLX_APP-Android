@@ -6,10 +6,17 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
+import com.mslx.console.data.AppLogger
+import com.mslx.console.data.AppSettings
+import com.mslx.console.data.localengine.LocalCoreInstaller
+import com.mslx.console.data.localengine.LocalInstanceMeta
+import com.mslx.console.data.localengine.LocalJreManager
+import com.mslx.console.data.localengine.LocalStorage
 import com.mslx.console.data.model.CreateServerRequest
 import com.mslx.console.data.model.LocalJava
 import com.mslx.console.data.model.ServerCoreDownloadInfo
 import com.mslx.console.data.remote.CreationProgressClient
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -50,6 +57,15 @@ data class CreationLog(
 
 data class WizardStep(val key: String, val title: String)
 
+/** 本机可选 Java 运行时（创建向导 Java 步的「本机」变体）。 */
+data class LocalRuntimeChoice(
+    val id: String,
+    val label: String,
+    val javaMajor: Int,
+    val installed: Boolean,
+    val embedded: Boolean,
+)
+
 fun wizardSteps(mode: Int): List<WizardStep> = when (mode) {
     2 -> listOf(
         WizardStep("basic", "基本信息"),
@@ -82,6 +98,8 @@ fun wizardSteps(mode: Int): List<WizardStep> = when (mode) {
 }
 
 data class CreateInstanceUiState(
+    // 创建目标: "daemon" 远程守护进程 / "local" 本机（进程内 JVM / Shizuku）
+    val target: String = "daemon",
     // 模式: 1 快速 / 2 整合包 / 3 基岩版 / 4 MCDR / 10 自定义
     val mode: Int = 1,
     val step: Int = 0,
@@ -120,6 +138,15 @@ data class CreateInstanceUiState(
     // Java 选项
     val onlineJavaVersions: List<String> = emptyList(),
     val localJavas: List<LocalJava> = emptyList(),
+    // —— 本机目标专用 ——
+    /** 本机选中的运行时 id（jre8/jre17/jre21）。 */
+    val selectedRuntimeId: String = LocalJreManager.RUNTIME_ID,
+    /** 当前 ABI 下可安装的本机运行时列表。 */
+    val localRuntimes: List<LocalRuntimeChoice> = emptyList(),
+    val localKeepAlive: Boolean = true,
+    val localUseSerialGc: Boolean = true,
+    /** 本机创建成功后落地的实例目录名（跳统一本机控制台用）。 */
+    val createdDirName: String = "",
     // 核心选择器
     val coreCategories: List<CoreCategory> = emptyList(),
     val coreSelectorVisible: Boolean = false,
@@ -148,7 +175,10 @@ data class CreateInstanceUiState(
 
 class CreateInstanceViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = getApplication<MSLXApplication>().container.instanceRepository
+    private val container = getApplication<MSLXApplication>().container
+    private val repository = container.instanceRepository
+    private val settingsStore = container.settingsStore
+    private val coreInstaller = LocalCoreInstaller(repository)
 
     private val _state = MutableStateFlow(CreateInstanceUiState())
     val state = _state.asStateFlow()
@@ -161,6 +191,8 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     init {
         loadJavaOptions()
         loadCoreCategories()
+        loadLocalRuntimes()
+        loadLocalDefaults()
     }
 
     fun update(transform: (CreateInstanceUiState) -> CreateInstanceUiState) {
@@ -191,6 +223,92 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
+    /**
+     * 切换创建目标（Daemon / 本机）。本机仅支持 Java 核心：
+     * 强制回到快速模式(1) 与第一步，并清理与本机无关的整合包/基岩版/MCDR 选项。
+     */
+    fun setTarget(target: String) {
+        if (_state.value.target == target) return
+        _state.update {
+            it.copy(
+                target = target,
+                step = 0,
+                mode = if (target == "local") 1 else it.mode,
+                downloadType = if (target == "local") "online" else it.downloadType,
+                javaType = if (target == "local") "local" else it.javaType,
+                core = "",
+                coreUrl = "",
+                coreSha256 = "",
+                coreFileKey = "",
+                onlineGameVersion = "",
+                packageFileKey = "",
+                packageUrl = "",
+                packageLocalPath = "",
+                success = false,
+                creating = false,
+                submitting = false,
+                createdServerId = "",
+                createdDirName = "",
+                error = null,
+            )
+        }
+        if (target == "local") loadLocalRuntimes()
+    }
+
+    /** 刷新本机可安装运行时（当前 ABI）。 */
+    fun loadLocalRuntimes() {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val abi = LocalJreManager.currentAbi()
+            val options = LocalJreManager.installableRuntimes(abi).map { rt ->
+                LocalRuntimeChoice(
+                    id = rt.id,
+                    label = rt.label,
+                    javaMajor = rt.javaMajor,
+                    installed = LocalJreManager.isInstalled(context, rt),
+                    embedded = LocalJreManager.hasEmbeddedAsset(context, rt, abi),
+                )
+            }
+            _state.update { s ->
+                // 选中的运行时若在当前 ABI 不可用，回退到已安装项或默认项
+                val valid = options.any { it.id == s.selectedRuntimeId }
+                val fallback = options.firstOrNull { it.installed }?.id ?: LocalJreManager.RUNTIME_ID
+                s.copy(localRuntimes = options, selectedRuntimeId = if (valid) s.selectedRuntimeId else fallback)
+            }
+        }
+    }
+
+    /** 本机默认保活 / SerialGC 从「本地开服设置」读取。 */
+    private fun loadLocalDefaults() {
+        viewModelScope.launch {
+            runCatching { settingsStore.settingsFlow.first() }
+                .onSuccess { s ->
+                    _state.update {
+                        it.copy(
+                            localKeepAlive = s.localKeepAlive,
+                            localUseSerialGc = s.localUseSerialGc,
+                            minM = s.localMinMemMb,
+                            maxM = s.localMaxMemMb,
+                        )
+                    }
+                }
+                .onFailure { AppLogger.w("Create", "读取本地开服默认设置失败", it) }
+        }
+    }
+
+    fun selectLocalRuntime(id: String) {
+        _state.update { it.copy(selectedRuntimeId = id) }
+    }
+
+    /** 按 MC 版本自动选中本机可用运行时（复用创建向导推荐规则）。 */
+    private fun autoRecommendLocalRuntime(gameVersion: String) {
+        val recommended = recommendedJavaFor(gameVersion) ?: return
+        val target = _state.value.localRuntimes.firstOrNull { it.javaMajor == recommended } ?: return
+        if (_state.value.selectedRuntimeId != target.id) {
+            _state.update { it.copy(selectedRuntimeId = target.id) }
+        }
+    }
+
     fun nextStep() {
         val s = _state.value
         val steps = wizardSteps(s.mode)
@@ -200,7 +318,12 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                 _message.tryEmit("请填写实例名称"); return
             }
             "core" -> {
-                if (s.mode == 3) {
+                if (s.target == "local") {
+                    // 本机：必须经 MSLAPI 在线选定核心（拿到下载地址与游戏版本）
+                    if (s.coreUrl.isBlank() || s.onlineGameVersion.isBlank()) {
+                        _message.tryEmit("请在线选择服务端核心（本机仅支持 MSLAPI 在线核心）"); return
+                    }
+                } else if (s.mode == 3) {
                     if (s.coreFileKey.isBlank() && s.coreUrl.isBlank()) {
                         _message.tryEmit("请在线选择、填写远程地址或上传基岩版核心"); return
                     }
@@ -211,7 +334,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
             "package" -> if (s.packageFileKey.isBlank() && s.packageUrl.isBlank() && s.packageLocalPath.isBlank()) {
                 _message.tryEmit("请提供整合包（上传 / 地址 / 本机路径）"); return
             }
-            "java" -> if (computedJava().isBlank()) {
+            "java" -> if (s.target != "local" && computedJava().isBlank()) {
                 _message.tryEmit("请配置 Java 环境"); return
             }
         }
@@ -380,6 +503,8 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                 coreVersionDescription = "",
             )
         }
+        // 本机目标：按核心版本自动选中推荐且可用的本机 Java 运行时
+        if (_state.value.target == "local") autoRecommendLocalRuntime(version)
     }
 
     fun clearCoreSelection() {
@@ -473,6 +598,10 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
 
     fun submit() {
         if (_state.value.submitting || _state.value.creating) return
+        if (_state.value.target == "local") {
+            submitLocal()
+            return
+        }
         val s = _state.value
         if (s.name.isBlank()) {
             _message.tryEmit("请填写实例名称")
@@ -559,6 +688,82 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
+    /**
+     * 本机创建：把已选定的 MSLAPI 核心（coreUrl/coreSha256/onlineGameVersion）下载到
+     * `filesDir/mslx/servers/<name>/server.jar`，并补全实例文件（eula/server.properties/instance.json），
+     * 不经 Daemon / SignalR。成功后置 success + createdDirName，由界面跳统一本机控制台。
+     */
+    private fun submitLocal() {
+        val s = _state.value
+        if (s.name.isBlank()) {
+            _message.tryEmit("请填写实例名称")
+            return
+        }
+        if (s.coreUrl.isBlank() || s.onlineGameVersion.isBlank()) {
+            _message.tryEmit("请在线选择服务端核心")
+            return
+        }
+        val context = getApplication<Application>()
+        LocalStorage.migrateLegacy(context)
+        LocalStorage.ensureBase(context)
+        val serverDir = LocalStorage.serverDir(context, s.name)
+        val dirName = serverDir.name
+        val runtime = LocalJreManager.runtimeById(s.selectedRuntimeId)
+        // 核心名：选择器写入的 core 形如 "$core-$version.jar"，去掉后缀还原；无则用运行时 id 占位
+        val coreName = s.core.removeSuffix("-${s.onlineGameVersion}.jar").ifBlank { "server" }
+        val meta = LocalInstanceMeta(
+            name = s.name,
+            directory = dirName,
+            runtimeId = runtime.id,
+            javaMajor = runtime.javaMajor,
+            abi = LocalJreManager.currentAbi(),
+            minMemMb = s.minM,
+            maxMemMb = s.maxM,
+            jvmArgs = s.args.trim(),
+            useSerialGc = s.localUseSerialGc,
+            keepAlive = s.localKeepAlive,
+            motd = s.name,
+        )
+        _state.update {
+            it.copy(
+                submitting = true,
+                creating = true,
+                error = null,
+                success = false,
+                creationProgress = 0.0,
+                createdDirName = dirName,
+                creationLogs = listOf(CreationLog("开始下载服务端核心 ${s.core}", null)),
+            )
+        }
+        viewModelScope.launch {
+            coreInstaller.installFromUrl(
+                url = s.coreUrl,
+                sha256 = s.coreSha256,
+                core = coreName,
+                version = s.onlineGameVersion,
+                serverDir = serverDir,
+                meta = meta,
+            ) { p ->
+                _state.update { it.copy(creationProgress = (p * 100.0).coerceIn(0.0, 100.0)) }
+            }.onSuccess { (_, finalMeta) ->
+                AppLogger.i("Create", "本机实例创建完成：${finalMeta.directory}")
+                _state.update {
+                    it.copy(
+                        submitting = false,
+                        creating = false,
+                        creationProgress = 100.0,
+                        success = true,
+                        createdDirName = finalMeta.directory,
+                    )
+                }
+            }.onFailure { e ->
+                AppLogger.w("Create", "本机实例创建失败", e)
+                _state.update { it.copy(submitting = false, creating = false, error = "创建失败：${e.message}") }
+                _message.tryEmit("创建失败：${e.message}")
+            }
+        }
+    }
+
     private fun startCreationProgress(serverId: String) {
         creationClient?.disconnect()
         val client = CreationProgressClient(
@@ -624,6 +829,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
             onlineJavaVersions = _state.value.onlineJavaVersions,
             localJavas = _state.value.localJavas,
             coreCategories = _state.value.coreCategories,
+            localRuntimes = _state.value.localRuntimes,
         )
     }
 
@@ -634,20 +840,8 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
 }
 
 /**
- * 根据 Minecraft 版本推荐 Java 主版本（与 MSLAPI 推荐规则一致）：
- * 1.16 及以下 → 8；1.17-1.20.4 → 17；1.20.5+ → 21；26+ → 25。
+ * 根据 Minecraft 版本推荐 Java 主版本：规则已下沉到 [LocalJreManager.recommendedMajorForGame]
+ * （本机运行时与远程创建共用同一张表，避免两边推荐不一致）。
  */
-fun recommendedJavaFor(gameVersion: String): Int? {
-    val version = gameVersion.trim().removePrefix("v")
-    val match = Regex("^(\\d+)\\.(\\d+)(?:\\.(\\d+))?").find(version) ?: return null
-    val major = match.groupValues[1].toIntOrNull() ?: return null
-    val minor = match.groupValues[2].toIntOrNull() ?: return null
-    val patch = match.groupValues.getOrNull(3)?.toIntOrNull() ?: 0
-    if (major >= 26) return 25
-    if (major != 1) return null
-    return when {
-        minor <= 16 -> 8
-        minor <= 20 && (minor < 20 || patch <= 4) -> 17
-        else -> 21
-    }
-}
+fun recommendedJavaFor(gameVersion: String): Int? =
+    LocalJreManager.recommendedMajorForGame(gameVersion)

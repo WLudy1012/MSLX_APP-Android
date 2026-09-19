@@ -46,6 +46,8 @@ data class AppSettings(
     val localJvmArgs: String = "",
     val localKeepAlive: Boolean = true,
     val localUseSerialGc: Boolean = true,
+    /** 本机开服增强模式：Shizuku 可用时以 shell 权限 exec 真正的 java 子进程（多实例/可重启/跨版本）。 */
+    val localUseShizuku: Boolean = false,
 ) {
     val activeDaemon: DaemonConfig?
         get() = daemons.firstOrNull { it.id == activeDaemonId }
@@ -71,6 +73,7 @@ class SettingsStore(private val context: Context) {
         val LOCAL_JVM_ARGS = stringPreferencesKey("local_jvm_args")
         val LOCAL_KEEP_ALIVE = booleanPreferencesKey("local_keep_alive")
         val LOCAL_USE_SERIAL_GC = booleanPreferencesKey("local_use_serial_gc")
+        val LOCAL_USE_SHIZUKU = booleanPreferencesKey("local_use_shizuku")
     }
 
     val settingsFlow: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
@@ -91,6 +94,7 @@ class SettingsStore(private val context: Context) {
             localJvmArgs = prefs[Keys.LOCAL_JVM_ARGS].orEmpty(),
             localKeepAlive = prefs[Keys.LOCAL_KEEP_ALIVE] ?: true,
             localUseSerialGc = prefs[Keys.LOCAL_USE_SERIAL_GC] ?: true,
+            localUseShizuku = prefs[Keys.LOCAL_USE_SHIZUKU] ?: false,
         )
     }
 
@@ -113,6 +117,7 @@ class SettingsStore(private val context: Context) {
             prefs[Keys.LOCAL_JVM_ARGS] = next.localJvmArgs
             prefs[Keys.LOCAL_KEEP_ALIVE] = next.localKeepAlive
             prefs[Keys.LOCAL_USE_SERIAL_GC] = next.localUseSerialGc
+            prefs[Keys.LOCAL_USE_SHIZUKU] = next.localUseShizuku
         }
     }
 
@@ -159,6 +164,9 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun markOnboarded() = update { it.copy(onboarded = true) }
+
+    /** 开关本机开服增强模式（Shizuku exec）。 */
+    suspend fun setLocalUseShizuku(enabled: Boolean) = update { it.copy(localUseShizuku = enabled) }
 
     /** 用户已同意第三方免责声明。 */
     suspend fun acceptDisclaimer() = update { it.copy(disclaimerAccepted = true) }

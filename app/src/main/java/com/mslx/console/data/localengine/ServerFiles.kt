@@ -142,6 +142,42 @@ object ServerFiles {
         com.google.gson.Gson().fromJson(f.readText(), LocalInstanceMeta::class.java)
     }.getOrNull()
 
+    /**
+     * 把实例元数据里的关键可见项同步进 `server.properties`（保留服务端自身写入的其它键）：
+     * 逐行替换已存在的键、缺失的已知键追加到末尾；文件不存在时用 [renderServerProperties] 生成。
+     */
+    fun patchServerProperties(dir: File, meta: LocalInstanceMeta): Result<Unit> = runCatching {
+        val file = File(dir, PROPERTIES_NAME)
+        val motd = meta.motd.ifBlank { meta.name.ifBlank { DEFAULT_SERVER_NAME } }
+        val updates = linkedMapOf(
+            "motd" to motd,
+            "server-port" to meta.serverPort.toString(),
+            "max-players" to meta.maxPlayers.toString(),
+            "online-mode" to meta.onlineMode.toString(),
+            "difficulty" to meta.difficulty,
+            "gamemode" to meta.gamemode,
+            "level-name" to meta.levelName,
+        )
+        if (!file.isFile) {
+            file.writeText(renderServerProperties(meta, LocalStorage.nowIso()))
+            return@runCatching
+        }
+        val lines = file.readLines().toMutableList()
+        val seen = mutableSetOf<String>()
+        for (i in lines.indices) {
+            val line = lines[i]
+            if (!line.contains('=')) continue
+            val key = line.substringBefore('=')
+            if (updates.containsKey(key)) {
+                lines[i] = "$key=${updates[key]}"
+                seen += key
+            }
+        }
+        updates.forEach { (k, v) -> if (k !in seen) lines += "$k=$v" }
+        file.writeText(lines.joinToString("\n") + "\n")
+        AppLogger.i("ServerFiles", "已同步 server.properties：${dir.name}")
+    }
+
     /** 供 UI 展示的实例目录清单（文件名 → 是否就绪）。 */
     fun listInstanceFiles(dir: File): List<Pair<String, Boolean>> {
         val expected = buildList {

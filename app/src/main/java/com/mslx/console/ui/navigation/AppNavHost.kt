@@ -17,18 +17,25 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import android.app.Application
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.mslx.console.data.AppSettings
 import com.mslx.console.ui.MainBottomNav
 import com.mslx.console.ui.TopPage
 import com.mslx.console.ui.connect.ConnectScreen
 import com.mslx.console.ui.console.ConsoleScreen
+import com.mslx.console.ui.console.ConsoleViewModel
+import com.mslx.console.ui.console.LocalConsoleViewModel
 import com.mslx.console.ui.create.CreateInstanceScreen
 import com.mslx.console.ui.create.CreateResetBus
 import com.mslx.console.ui.home.HomeScreen
 import com.mslx.console.ui.instances.InstancesScreen
-import com.mslx.console.ui.local.LocalHostScreen
 import com.mslx.console.ui.settings.InstanceSettingsScreen
 import com.mslx.console.ui.settings.FileManagerScreen
+import com.mslx.console.ui.settings.LocalInstanceSettingsScreen
 import com.mslx.console.ui.settings.PluginsModsScreen
 import com.mslx.console.ui.settings.ServerPropertiesScreen
 import com.mslx.console.ui.settings.LocalServerSettingsScreen
@@ -58,13 +65,14 @@ object Routes {
     const val APPEARANCE = "appearance"
     const val ABOUT = "about"
     const val LOGS = "logs"
-    const val LOCAL_SERVER = "localServer?dir={dir}"
+    const val LOCAL_CONSOLE = "console/local/{dir}"
+    const val LOCAL_INSTANCE_SETTINGS = "instanceSettings/local/{dir}"
     const val LOCAL_SERVER_SETTINGS = "localServerSettings"
     const val SERVERS = "servers"
 
-    fun localServer(dir: String? = null): String = "localServer?dir=${dir.orEmpty()}"
-
     fun console(instanceId: Long): String = "console/$instanceId"
+    fun localConsole(dir: String): String = "console/local/${android.net.Uri.encode(dir)}"
+    fun localInstanceSettings(dir: String): String = "instanceSettings/local/${android.net.Uri.encode(dir)}"
     fun connect(auto: Boolean, daemonId: String? = null): String =
         "connect?auto=$auto&daemonId=${daemonId.orEmpty()}"
     fun instanceSettings(instanceId: Long): String = "instanceSettings/$instanceId"
@@ -87,9 +95,12 @@ fun AppNavHost(
 
     fun navigateTopLevel(route: String) {
         navController.navigate(route) {
-            popUpTo(Routes.HOME) { saveState = true }
+            // 底部 tab 必须直达其根页面：popUpTo(HOME) 清掉栈里其他 tab 与二级页。
+            // 不启用 saveState/restoreState：否则 popUpTo 保存的是“整段栈”
+            //（例：设置→服务端总览时保存段为 [SETTINGS, SERVERS]，栈顶是 SERVERS），
+            // 切回该 tab 时 restoreState 恢复整段栈，会落到二级页或看似“无反应”。
+            popUpTo(Routes.HOME)
             launchSingleTop = true
-            restoreState = true
         }
     }
 
@@ -206,6 +217,9 @@ fun AppNavHost(
                     onOpenInstance = { id ->
                         navController.navigate(Routes.console(id)) { launchSingleTop = true }
                     },
+                    onOpenLocalInstance = { dir ->
+                        navController.navigate(Routes.localConsole(dir)) { launchSingleTop = true }
+                    },
                 )
             }
 
@@ -216,6 +230,9 @@ fun AppNavHost(
                     onOpenSettings = { navigateTopLevel(Routes.SETTINGS) },
                     onOpenConsole = { id ->
                         navController.navigate(Routes.console(id)) { launchSingleTop = true }
+                    },
+                    onOpenLocalConsole = { dir ->
+                        navController.navigate(Routes.localConsole(dir)) { launchSingleTop = true }
                     },
                 )
             }
@@ -248,7 +265,8 @@ fun AppNavHost(
                         navController.navigate(Routes.ABOUT) { launchSingleTop = true }
                     },
                     onOpenLocalServer = {
-                        navController.navigate(Routes.localServer()) { launchSingleTop = true }
+                        // 退役独立 LocalHostScreen：本机开服并入统一创建向导（目标=本机）
+                        navigateTopLevel(Routes.NEW_INSTANCE)
                     },
                     onOpenLocalServerSettings = {
                         navController.navigate(Routes.LOCAL_SERVER_SETTINGS) { launchSingleTop = true }
@@ -259,13 +277,27 @@ fun AppNavHost(
                 )
             }
 
+            // 本机实例统一控制台（目录名为 key，绑定 LocalServerRuntime）
             composable(
-                route = Routes.LOCAL_SERVER,
-                arguments = listOf(navArgument("dir") { type = NavType.StringType; defaultValue = "" }),
+                route = Routes.LOCAL_CONSOLE,
+                arguments = listOf(navArgument("dir") { type = NavType.StringType }),
             ) { entry ->
-                LocalHostScreen(
+                val dir = entry.arguments?.getString("dir").orEmpty()
+                val consoleVm: LocalConsoleViewModel = viewModel(
+                    key = "localconsole_$dir",
+                    factory = viewModelFactory {
+                        initializer {
+                            val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
+                            LocalConsoleViewModel(app, dir)
+                        }
+                    },
+                )
+                ConsoleScreen(
+                    controller = consoleVm,
                     onBack = { navController.popBackStack() },
-                    initialDir = entry.arguments?.getString("dir").orEmpty(),
+                    onOpenSettings = {
+                        navController.navigate(Routes.localInstanceSettings(dir)) { launchSingleTop = true }
+                    },
                 )
             }
 
@@ -274,19 +306,38 @@ fun AppNavHost(
                 ServersOverviewScreen(
                     onBack = { navController.popBackStack() },
                     onOpenLocalServer = { dir ->
-                        navController.navigate(Routes.localServer(dir.takeIf { it.isNotBlank() })) { launchSingleTop = true }
+                        if (dir.isBlank()) {
+                            // "新建"是底部 tab：必须走 navigateTopLevel 清栈，
+                            // 否则会把 NEW_INSTANCE 压在 SETTINGS 之上，污染返回栈
+                            // 导致之后点"设置"tab 命中 saveState/restoreState 冲突而失效。
+                            navigateTopLevel(Routes.NEW_INSTANCE)
+                        } else {
+                            navController.navigate(Routes.localConsole(dir)) { launchSingleTop = true }
+                        }
                     },
                     onOpenConsole = { instanceId ->
                         navController.navigate(Routes.console(instanceId)) { launchSingleTop = true }
                     },
                     onOpenCreate = {
-                        navController.navigate(Routes.NEW_INSTANCE) { launchSingleTop = true }
+                        navigateTopLevel(Routes.NEW_INSTANCE)
                     },
                 )
             }
 
             composable(Routes.LOCAL_SERVER_SETTINGS) {
                 LocalServerSettingsScreen(onBack = { navController.popBackStack() })
+            }
+
+            // 本机实例设置（直接编辑 instance.json + server.properties）
+            composable(
+                route = Routes.LOCAL_INSTANCE_SETTINGS,
+                arguments = listOf(navArgument("dir") { type = NavType.StringType }),
+            ) { entry ->
+                val dir = entry.arguments?.getString("dir").orEmpty()
+                LocalInstanceSettingsScreen(
+                    dirName = dir,
+                    onBack = { navController.popBackStack() },
+                )
             }
 
             composable(Routes.APPEARANCE) {
@@ -310,8 +361,17 @@ fun AppNavHost(
                 arguments = listOf(navArgument("instanceId") { type = NavType.LongType }),
             ) { backStackEntry ->
                 val instanceId = backStackEntry.arguments?.getLong("instanceId") ?: 0L
+                val consoleVm: ConsoleViewModel = viewModel(
+                    key = "console_$instanceId",
+                    factory = viewModelFactory {
+                        initializer {
+                            val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
+                            ConsoleViewModel(app, instanceId)
+                        }
+                    },
+                )
                 ConsoleScreen(
-                    instanceId = instanceId,
+                    controller = consoleVm,
                     onBack = { navController.popBackStack() },
                     onOpenSettings = {
                         navController.navigate(Routes.instanceSettings(instanceId)) {

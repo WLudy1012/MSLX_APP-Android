@@ -16,6 +16,7 @@ splashscreen = "1.0.1"
 coil = "2.7.0"
 xz = "1.10"
 commonsCompress = "1.27.1"
+shizuku = "13.1.5"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -44,6 +45,9 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 # 本机开服：解压内嵌 Android JRE（上游发行包为 .tar.xz）
 xz = { group = "org.tukaani", name = "xz", version.ref = "xz" }
 commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
+# 本机开服增强：Shizuku/ADB 权限下 exec 真正的 java 子进程（多实例/可重启/跨版本）
+shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
+shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

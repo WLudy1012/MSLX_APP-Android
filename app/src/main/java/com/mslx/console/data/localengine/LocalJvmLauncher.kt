@@ -31,6 +31,7 @@ class LocalJvmLauncher(
     private val maxMemM: Int,
     private val extraArgs: List<String> = emptyList(),
     private val useSerialGc: Boolean = true,
+    private val runtime: LocalJreManager.JavaRuntime = LocalJreManager.DEFAULT_RUNTIME,
 ) {
 
     /** 服务端主类返回时回调（工作线程里调用，实现方需自行切线程）。 */
@@ -61,11 +62,13 @@ class LocalJvmLauncher(
             emit("本进程已经创建过 JVM：Android 上 JVM 无法重启，请完全退出 App 后再试")
             return false
         }
-        val libjvm = File(jreHome, "lib/server/libjvm.so")
-        if (!libjvm.isFile) {
-            emit("JRE 不完整：缺少 ${libjvm.path}（请先安装 JRE）")
+        val libjvm = LocalJreManager.libjvmIn(jreHome)
+        if (libjvm == null) {
+            emit("JRE 不完整：在 ${jreHome.path} 下未找到 libjvm.so（请先安装 ${runtime.label}）")
             return false
         }
+        // 真正的 java.home：从 libjvm 回溯到含 lib/ 的目录（兼容 Java 8 的 jre/ 嵌套布局）
+        val javaHome = LocalJreManager.resolveJavaHome(jreHome, libjvm)
         if (!serverJar.isFile) {
             emit("服务端核心不存在：${serverJar.path}")
             return false
@@ -91,9 +94,9 @@ class LocalJvmLauncher(
             }
         resolved.note?.let { emit(it) }
 
-        val options = buildOptions(resolved)
-        emit("启动 JVM：Java ${LocalJreManager.JAVA_MAJOR}，-Xmx${maxMemM}M，主类 ${resolved.mainClass}")
-        val rc = NativeVm.createJvm(libjvm.absolutePath, jreHome.absolutePath, options.toTypedArray())
+        val options = buildOptions(resolved, javaHome)
+        emit("启动 JVM：${runtime.label}，-Xmx${maxMemM}M，主类 ${resolved.mainClass}")
+        val rc = NativeVm.createJvm(libjvm.absolutePath, javaHome.absolutePath, options.toTypedArray())
         if (rc != 0) {
             emit("JVM 创建失败（rc=$rc），详见 App 日志")
             return false
@@ -131,7 +134,7 @@ class LocalJvmLauncher(
         sendCommand("stop")
     }
 
-    private fun buildOptions(resolved: ServerEntrypoint.Resolved): List<String> {
+    private fun buildOptions(resolved: ServerEntrypoint.Resolved, javaHome: File): List<String> {
         val classpath = resolved.classpath.joinToString(File.pathSeparator) { it.absolutePath }
         val tmpDir = File(workDir, "tmp").apply { mkdirs() }
         return buildList {
@@ -139,9 +142,9 @@ class LocalJvmLauncher(
             add("-Xmx${maxMemM}M")
             // Android 上 G1 表现不稳（PojavLauncher 同样固定 SerialGC），可在设置里关闭或用额外参数覆盖
             if (useSerialGc) add("-XX:+UseSerialGC")
-            add("-Djava.home=${jreHome.absolutePath}")
+            add("-Djava.home=${javaHome.absolutePath}")
             add("-Djava.class.path=$classpath")
-            add("-Djava.library.path=${jreHome.absolutePath}/lib:${jreHome.absolutePath}/lib/server")
+            add("-Djava.library.path=${javaHome.absolutePath}/lib:${javaHome.absolutePath}/lib/server")
             add("-Djava.io.tmpdir=${tmpDir.absolutePath}")
             add("-Duser.home=${workDir.absolutePath}")
             add("-Duser.dir=${workDir.absolutePath}")
@@ -151,6 +154,9 @@ class LocalJvmLauncher(
             add("-Dterminal.jline=false")
             add("-Dterminal.ansi=true")
             add("-Dlog4j2.formatMsgNoLookups=true")
+            // 内嵌 JRE 的 java.version 形如 `17-internal`（含 `-`），Paper 会当成非 GA 预发布版
+            // 直接退出；这是其官方跳过开关（进程内 JVM 同样需要）。
+            add("-DPaper.IgnoreJavaVersion=true")
             addAll(extraArgs)
         }
     }
