@@ -3,6 +3,7 @@ package com.mslx.console.data
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -32,6 +33,19 @@ data class DaemonConfig(
 
 enum class ThemeMode { DYNAMIC, SEED }
 
+/** 默认主题色：硫磺史莱姆黄绿（与 ui.theme.DEFAULT_SEED_COLOR 保持一致）。 */
+const val DEFAULT_SEED_COLOR = 0xFF9FA83A
+
+/**
+ * 1.7.2 及以前的默认主题色(青蓝 0xFF00838F)。
+ * 老版本未写盘时按默认值兜底，因此读到该值且无迁移标记时视为「未自定义」，
+ * 一次性升级到 [DEFAULT_SEED_COLOR]；迁移后用户再显式选择青蓝预设不受影响。
+ */
+private const val LEGACY_DEFAULT_SEED_COLOR = 0xFF00838F
+
+/** 玻璃面板默认不透明度（与 ui.theme.DEFAULT_GLASS_ALPHA 保持一致）。 */
+private const val DEFAULT_GLASS_ALPHA = 0.78f
+
 /** 更新渠道：稳定版(默认) / 测试版(Beta) / Actions 调试构建。 */
 enum class UpdateChannel { STABLE, BETA, ACTIONS }
 
@@ -40,7 +54,13 @@ data class AppSettings(
     val daemons: List<DaemonConfig> = emptyList(),
     val activeDaemonId: String? = null,
     val themeMode: ThemeMode = ThemeMode.SEED,
-    val seedColor: Long = 0xFF00838F,
+    val seedColor: Long = DEFAULT_SEED_COLOR,
+    /** 毛玻璃面板不透明度（0.25-1.0，1.0 为不透明）。 */
+    val glassAlpha: Float = DEFAULT_GLASS_ALPHA,
+    /** 浅色模式自定义背景图路径（filesDir/theme 下）；空串表示未设置。 */
+    val lightBackgroundPath: String = "",
+    /** 深色模式自定义背景图路径；空串表示未设置。 */
+    val darkBackgroundPath: String = "",
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val onboarded: Boolean = false,
     val disclaimerAccepted: Boolean = false,
@@ -80,6 +100,11 @@ class SettingsStore(private val context: Context) {
         val ACTIVE_DAEMON = stringPreferencesKey("active_daemon")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val SEED_COLOR = longPreferencesKey("seed_color")
+        /** 主题色迁移标记：置位后老默认青蓝不再被重写为品牌新默认色。 */
+        val SEED_COLOR_MIGRATED = booleanPreferencesKey("seed_color_migrated")
+        val GLASS_ALPHA = floatPreferencesKey("glass_alpha")
+        val BACKGROUND_LIGHT = stringPreferencesKey("background_light")
+        val BACKGROUND_DARK = stringPreferencesKey("background_dark")
         val ONBOARDED = booleanPreferencesKey("onboarded")
         val DISCLAIMER_ACCEPTED = booleanPreferencesKey("disclaimer_accepted")
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
@@ -99,7 +124,13 @@ class SettingsStore(private val context: Context) {
             daemons = decoded?.daemons ?: emptyList(),
             activeDaemonId = prefs[Keys.ACTIVE_DAEMON]?.takeIf { it.isNotBlank() },
             themeMode = if (prefs[Keys.THEME_MODE] == "dynamic") ThemeMode.DYNAMIC else ThemeMode.SEED,
-            seedColor = prefs[Keys.SEED_COLOR] ?: 0xFF00838F,
+            // 老版本默认色(青蓝)在迁移前视为「未自定义」，统一升级为硫磺史莱姆品牌色。
+            seedColor = prefs[Keys.SEED_COLOR]?.takeIf {
+                it != LEGACY_DEFAULT_SEED_COLOR || prefs[Keys.SEED_COLOR_MIGRATED] == true
+            } ?: DEFAULT_SEED_COLOR,
+            glassAlpha = prefs[Keys.GLASS_ALPHA] ?: DEFAULT_GLASS_ALPHA,
+            lightBackgroundPath = prefs[Keys.BACKGROUND_LIGHT].orEmpty(),
+            darkBackgroundPath = prefs[Keys.BACKGROUND_DARK].orEmpty(),
             updateChannel = when (prefs[Keys.UPDATE_CHANNEL]) {
                 "beta" -> UpdateChannel.BETA
                 "actions" -> UpdateChannel.ACTIONS
@@ -124,6 +155,10 @@ class SettingsStore(private val context: Context) {
             prefs[Keys.ACTIVE_DAEMON] = next.activeDaemonId ?: ""
             prefs[Keys.THEME_MODE] = if (next.themeMode == ThemeMode.SEED) "seed" else "dynamic"
             prefs[Keys.SEED_COLOR] = next.seedColor
+            prefs[Keys.SEED_COLOR_MIGRATED] = true
+            prefs[Keys.GLASS_ALPHA] = next.glassAlpha
+            prefs[Keys.BACKGROUND_LIGHT] = next.lightBackgroundPath
+            prefs[Keys.BACKGROUND_DARK] = next.darkBackgroundPath
             prefs[Keys.ONBOARDED] = next.onboarded
             prefs[Keys.DISCLAIMER_ACCEPTED] = next.disclaimerAccepted
             prefs[Keys.UPDATE_CHANNEL] = when (next.updateChannel) {
@@ -166,6 +201,23 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setTheme(mode: ThemeMode, seedColor: Long) =
         update { it.copy(themeMode = mode, seedColor = seedColor) }
+
+    /** 保存毛玻璃面板不透明度。 */
+    suspend fun setGlassAlpha(alpha: Float) = update { it.copy(glassAlpha = alpha) }
+
+    /** 保存自定义背景图路径（[dark] 选择深浅模式槽位）。 */
+    suspend fun setThemeBackground(dark: Boolean, path: String) = update {
+        if (dark) it.copy(darkBackgroundPath = path) else it.copy(lightBackgroundPath = path)
+    }
+
+    /** 恢复毛玻璃默认：清空背景图并回到默认不透明度。 */
+    suspend fun resetGlassAppearance() = update {
+        it.copy(
+            glassAlpha = DEFAULT_GLASS_ALPHA,
+            lightBackgroundPath = "",
+            darkBackgroundPath = "",
+        )
+    }
 
     suspend fun setUpdateChannel(channel: UpdateChannel) =
         update { it.copy(updateChannel = channel) }

@@ -2,10 +2,8 @@ package com.mslx.console.ui.navigation
 
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -138,12 +136,8 @@ fun AppNavHost(
         else -> null
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            // 主题背景兜底：页面切换瞬间不露出窗口白底
-            .background(MaterialTheme.colorScheme.background),
-    ) {
+    // 根容器保持透明：底色由 MainActivity 的 GlassBackground 提供（毛玻璃背景层）
+    Column(Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
             startDestination = Routes.SPLASH,

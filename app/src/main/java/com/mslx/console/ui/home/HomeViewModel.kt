@@ -1,6 +1,7 @@
 package com.mslx.console.ui.home
 
 import android.app.Application
+import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
@@ -8,6 +9,7 @@ import com.mslx.console.data.AppSettings
 import com.mslx.console.data.AppLogger
 import com.mslx.console.data.DaemonState
 import com.mslx.console.data.DaemonStatus
+import com.mslx.console.data.InstanceIcons
 import com.mslx.console.data.InstanceRepository
 import com.mslx.console.data.ManagedServer
 import com.mslx.console.data.ServerRef
@@ -70,6 +72,8 @@ data class HomeUiState(
     val onlySelected: Boolean = false,
     /** 聚合实例列表：本机实例 + 所有 Daemon 的实例。 */
     val servers: List<ManagedServer> = emptyList(),
+    /** 实例图标（key = [ManagedServer.key]）；未加载到的不显示（占位状态点）。 */
+    val icons: Map<String, Bitmap> = emptyMap(),
     val notifications: List<ServerNotification> = emptyList(),
     // 一言金句
     val quote: String = "",
@@ -229,6 +233,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             .onSuccess { servers ->
                 _state.update { it.copy(refreshing = false, error = null, servers = servers) }
                 detectStatusChanges(servers)
+                loadIcons(servers)
             }
             .onFailure { e ->
                 AppLogger.w("Home", "聚合服务端列表失败", e)
@@ -242,6 +247,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 手动刷新（下拉刷新 / 卡片上的重连按钮共用的入口）。 */
     fun refresh() {
         viewModelScope.launch { reload() }
+    }
+
+    /**
+     * 批量补齐实例图标（缓存命中不发请求），并入已有图标：
+     * 单条失败不影响其它条目，已加载的图标不会因一次网络抖动而丢失。
+     */
+    private suspend fun loadIcons(servers: List<ManagedServer>) {
+        val icons = InstanceIcons.load(container, servers)
+        if (icons.isEmpty()) return
+        _state.update { it.copy(icons = it.icons + icons) }
     }
 
     /** 卡片滑动切页：只改选中的 Daemon，不触发网络请求。 */

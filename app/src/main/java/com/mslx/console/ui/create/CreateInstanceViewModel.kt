@@ -151,7 +151,7 @@ data class CreateInstanceUiState(
     val onlineJavaVersions: List<String> = emptyList(),
     val localJavas: List<LocalJava> = emptyList(),
     // —— 本机目标专用 ——
-    /** 本机选中的运行时 id（jre8/jre17/jre21）。 */
+    /** 本机选中的运行时 id（jre8/jre17/jre21/jre25）。 */
     val selectedRuntimeId: String = LocalJreManager.RUNTIME_ID,
     /** 当前 ABI 下可安装的本机运行时列表。 */
     val localRuntimes: List<LocalRuntimeChoice> = emptyList(),

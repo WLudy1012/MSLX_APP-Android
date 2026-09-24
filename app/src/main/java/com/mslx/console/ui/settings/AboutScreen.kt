@@ -58,6 +58,8 @@ fun AboutScreen(
     }.getOrDefault("")
 
     Scaffold(
+        // 页面透明：透出全局毛玻璃背景层
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("关于") },

@@ -1,12 +1,18 @@
 package com.mslx.console.ui.connect
 
 import android.app.Application
+import android.os.Build
+import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
 import com.mslx.console.data.DaemonConfig
 import com.mslx.console.data.InstanceRepository
+import com.mslx.console.data.model.PairCodeData
+import com.mslx.console.data.model.PairCodeRequest
+import com.mslx.console.data.model.PairRedeemRequest
 import com.mslx.console.data.remote.ApiClient
+import com.mslx.console.data.remote.PairingPayloadCodec
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -14,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import java.util.UUID
 
 data class ConnectUiState(
@@ -25,6 +32,12 @@ data class ConnectUiState(
     val loading: Boolean = false,
     val autoChecking: Boolean = false,
     val error: String? = null,
+    /** 扫码配对兑换中。 */
+    val pairing: Boolean = false,
+    /** 正在生成配对二维码。 */
+    val generating: Boolean = false,
+    /** 生成成功的配对码（非空时界面弹二维码窗）。 */
+    val pairCode: PairCodeData? = null,
 )
 
 class ConnectViewModel(
@@ -151,4 +164,121 @@ class ConnectViewModel(
             }
         }
     }
+
+    // ---------------- 扫码配对（Daemon 插件 mslx-pair） ----------------
+
+    /**
+     * 处理扫码结果：解析 `mslxp1:` 载荷 → 调用插件 redeem 端点兑换一次性受限 API Key →
+     * 自动填入表单并立即校验连接。失败时给出可执行的提示，而不是只抛异常文案。
+     */
+    fun onScanResult(contents: String?) {
+        if (contents.isNullOrBlank()) return // 用户取消扫码，不提示
+        val payload = PairingPayloadCodec.decode(contents)
+        if (payload == null) {
+            _state.update { it.copy(error = "无法识别的二维码：请扫描 Daemon 端「扫码配对」生成的配对二维码。") }
+            return
+        }
+        val url = payload.url?.trim().orEmpty()
+        if (payload.version != 1 || url.isBlank() || payload.code.isNullOrBlank()) {
+            _state.update { it.copy(error = "配对二维码内容不完整，请在服务端重新生成。") }
+            return
+        }
+        if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
+            _state.update { it.copy(error = "配对二维码中的 Daemon 地址无效，请在服务端重新生成。") }
+            return
+        }
+        if (payload.expiresAt > 0 && payload.expiresAt * 1000L < System.currentTimeMillis()) {
+            _state.update { it.copy(error = "配对二维码已过期，请在服务端重新生成。") }
+            return
+        }
+        if (_state.value.pairing || _state.value.loading) return
+        _state.update { it.copy(pairing = true, error = null) }
+
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "Android 设备" }
+            // ANDROID_ID 无需权限；同一 App 在同一设备上稳定，供服务端识别同机重复配对并替换旧凭据
+            val fingerprint = Settings.Secure.getString(app.contentResolver, Settings.Secure.ANDROID_ID)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { "android-$it" }
+            // 兑换用未认证客户端：redeem 是插件唯一的匿名端点，内部做签名/时效/一次性/IP 限速校验
+            val api = ApiClient.build(url, "")
+            runCatching { api.pairRedeem(PairRedeemRequest(contents, deviceName, fingerprint)) }
+                .onSuccess { resp ->
+                    val data = resp.data
+                    if (resp.code != 200 || data?.apiKey.isNullOrBlank()) {
+                        _state.update {
+                            it.copy(pairing = false, error = "扫码配对失败：${resp.message ?: "服务端未返回有效凭据"}")
+                        }
+                        return@onSuccess
+                    }
+                    val daemonUrl = data.daemonUrl?.takeIf { it.isNotBlank() } ?: url
+                    val isHttp = daemonUrl.startsWith("http://", ignoreCase = true)
+                    _state.update {
+                        it.copy(
+                            name = it.name.trim().ifBlank { deviceName },
+                            baseUrl = daemonUrl,
+                            apiKey = data.apiKey,
+                            allowHttp = isHttp,
+                            pairing = false,
+                            error = null,
+                        )
+                    }
+                    com.mslx.console.data.AppLogger.i("Connect", "扫码配对成功 role=${data.role} 凭据到期 ${data.expiresAt}")
+                    if (isHttp) {
+                        // 明文地址不静默自动连接：与手填流程一致，让用户知情后再点"连接"
+                        _state.update {
+                            it.copy(error = "配对成功，但该 Daemon 使用 HTTP 明文地址；已勾选「允许 HTTP 连接」，请确认风险后点击连接。")
+                        }
+                    } else {
+                        connect()
+                    }
+                }
+                .onFailure { e ->
+                    val detail = when ((e as? HttpException)?.code()) {
+                        404 -> "服务端未安装扫码配对插件（mslx-pair）或版本过旧。"
+                        else -> ApiClient.errorMessageFrom(e) ?: e.message ?: "网络异常"
+                    }
+                    com.mslx.console.data.AppLogger.w("Connect", "扫码配对失败", e)
+                    _state.update { it.copy(pairing = false, error = "扫码配对失败：$detail") }
+                }
+        }
+    }
+
+    /** 生成一次性配对二维码（使用当前表单里的管理员凭据，供另一台设备扫码接入）。 */
+    fun createPairCode() {
+        val s = _state.value
+        val baseUrl = normalizeBaseUrl(s.baseUrl, s.allowHttp)
+        val apiKey = s.apiKey.trim()
+        if (baseUrl.isBlank() || apiKey.isBlank()) {
+            _state.update { it.copy(error = "请先填写 Daemon 地址与 API Key，再生成配对二维码。") }
+            return
+        }
+        if (s.generating) return
+        _state.update { it.copy(generating = true, error = null) }
+        viewModelScope.launch {
+            runCatching { ApiClient.build(baseUrl, apiKey).pairCreateCode(PairCodeRequest()) }
+                .onSuccess { resp ->
+                    val data = resp.data
+                    if (resp.code != 200 || data?.payload.isNullOrBlank()) {
+                        _state.update {
+                            it.copy(generating = false, error = "生成配对码失败：${resp.message ?: "服务端未返回配对码"}")
+                        }
+                    } else {
+                        _state.update { it.copy(generating = false, pairCode = data) }
+                    }
+                }
+                .onFailure { e ->
+                    val detail = when ((e as? HttpException)?.code()) {
+                        404 -> "服务端未安装扫码配对插件（mslx-pair）或版本过旧。"
+                        403 -> "当前 API Key 权限不足：生成配对码需要管理员权限。"
+                        else -> ApiClient.errorMessageFrom(e) ?: e.message ?: "网络异常"
+                    }
+                    _state.update { it.copy(generating = false, error = "生成配对码失败：$detail") }
+                }
+        }
+    }
+
+    /** 关闭配对二维码弹窗。 */
+    fun dismissPairCode() = _state.update { it.copy(pairCode = null) }
 }

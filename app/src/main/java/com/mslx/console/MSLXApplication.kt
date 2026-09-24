@@ -3,6 +3,7 @@ package com.mslx.console
 import android.app.Application
 import com.mslx.console.data.AppContainer
 import com.mslx.console.data.AppLogger
+import com.mslx.console.data.InstanceIconStore
 
 class MSLXApplication : Application() {
 
@@ -13,6 +14,7 @@ class MSLXApplication : Application() {
         super.onCreate()
         // 日志必须在 container 之前初始化：崩溃处理器与首个日志点尽早就位
         AppLogger.init(this)
+        InstanceIconStore.init(this)
         container = AppContainer(this)
     }
 }

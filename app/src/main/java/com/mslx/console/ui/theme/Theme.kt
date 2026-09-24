@@ -16,13 +16,29 @@ import com.mslx.console.data.ThemeMode
 
 data class ThemeConfig(
     val mode: ThemeMode = ThemeMode.SEED,
-    val seedColor: Long = 0xFF00838F,
+    val seedColor: Long = DEFAULT_SEED_COLOR,
+    /** 玻璃面板不透明度（0.25-1.0，1.0 为不透明）。 */
+    val glassAlpha: Float = DEFAULT_GLASS_ALPHA,
+    /** 浅色模式自定义背景图绝对路径；空串表示未设置。 */
+    val lightBackground: String = "",
+    /** 深色模式自定义背景图绝对路径；空串表示未设置。 */
+    val darkBackground: String = "",
 )
 
 data class PresetColor(val name: String, val argb: Long)
 
-/** 设置页可选的预设种子色。 */
+/**
+ * 默认主题色：硫磺史莱姆黄绿（与 Launcher 图标同一色系）。
+ * 历史默认色（青蓝 0xFF00838F）在 [com.mslx.console.data.SettingsStore] 里按「未自定义」升级到本值。
+ */
+const val DEFAULT_SEED_COLOR = 0xFF9FA83A
+
+/** 玻璃面板默认不透明度：轻微透出背景，兼顾内容可读性。 */
+const val DEFAULT_GLASS_ALPHA = 0.78f
+
+/** 设置页可选的预设种子色（首项为当前品牌默认色）。 */
 val PresetColors = listOf(
+    PresetColor("硫磺史莱姆", DEFAULT_SEED_COLOR),
     PresetColor("青蓝", 0xFF00838F),
     PresetColor("海洋蓝", 0xFF1E88E5),
     PresetColor("森林绿", 0xFF43A047),

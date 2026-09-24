@@ -1,5 +1,7 @@
 package com.mslx.console.ui.instances
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,6 +50,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -90,6 +94,8 @@ fun InstancesScreen(
     }
 
     Scaffold(
+        // 页面透明：透出全局毛玻璃背景层
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -189,6 +195,7 @@ fun InstancesScreen(
                             items(state.servers, key = { it.key }) { server ->
                                 InstanceCard(
                                     server = server,
+                                    icon = state.icons[server.key],
                                     busy = server.key in state.busyKeys,
                                     onClick = { server.ref?.let(onOpenServer) },
                                     onToggle = { viewModel.toggle(server, start = !server.running) },
@@ -259,6 +266,7 @@ private fun EmptyIcon() {
 @Composable
 private fun InstanceCard(
     server: ManagedServer,
+    icon: Bitmap?,
     busy: Boolean,
     onClick: () -> Unit,
     onToggle: () -> Unit,
@@ -280,15 +288,26 @@ private fun InstanceCard(
                 .padding(horizontal = 14.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 状态色块
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(statusColor(statusCode).copy(alpha = 0.16f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                StatusDot(statusCode)
+            // 图标（有则显示，无则回退状态色块）
+            if (icon != null) {
+                Image(
+                    bitmap = icon.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(13.dp)),
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(statusColor(statusCode).copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    StatusDot(statusCode)
+                }
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {

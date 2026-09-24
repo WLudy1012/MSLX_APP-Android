@@ -1,7 +1,10 @@
 package com.mslx.console.ui.connect
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -26,6 +30,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -40,12 +45,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import com.mslx.console.R
+import com.mslx.console.data.model.PairCodeData
 import android.app.Application
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,6 +82,10 @@ fun ConnectScreen(
         },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // 扫码配对：ScanContract 用户取消时 result.contents 为 null（由 ViewModel 静默忽略）
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        viewModel.onScanResult(result.contents)
+    }
     var showKey by remember { mutableStateOf(false) }
     var failMessage by remember { mutableStateOf<String?>(null) }
     var showHttpWarning by remember { mutableStateOf(false) }
@@ -86,6 +100,8 @@ fun ConnectScreen(
     }
 
     Scaffold(
+        // 页面透明：透出全局毛玻璃背景层
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             if (onBack != null) {
                 TopAppBar(
@@ -112,9 +128,9 @@ fun ConnectScreen(
         ) {
             if (onBack == null) {
                 Image(
-                    painter = painterResource(R.drawable.mslx_logo),
+                    painter = painterResource(R.drawable.slime_logo),
                     contentDescription = "MSLX",
-                    modifier = Modifier.size(84.dp),
+                    modifier = Modifier.size(92.dp),
                 )
                 Spacer(Modifier.height(18.dp))
                 Text(
@@ -225,6 +241,57 @@ fun ConnectScreen(
                 }
             }
 
+            // 扫码配对：添加模式扫码接入；编辑模式用当前凭据为其它设备生成配对码
+            if (onBack == null) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = {
+                        scanLauncher.launch(
+                            ScanOptions()
+                                .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                .setPrompt("对准 Daemon 端生成的配对二维码")
+                                .setBeepEnabled(false)
+                                .setOrientationLocked(false),
+                        )
+                    },
+                    enabled = !state.loading && !state.pairing,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                ) {
+                    if (state.pairing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.size(10.dp))
+                        Text("正在配对…", style = MaterialTheme.typography.titleMedium)
+                    } else {
+                        Text("扫码配对", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            } else {
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = viewModel::createPairCode,
+                    enabled = !state.loading && !state.generating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                ) {
+                    if (state.generating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.size(10.dp))
+                        Text("正在生成…", style = MaterialTheme.typography.titleMedium)
+                    } else {
+                        Text("生成配对二维码", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+
             Spacer(Modifier.height(28.dp))
             Card(
                 colors = CardDefaults.cardColors(
@@ -254,6 +321,11 @@ fun ConnectScreen(
                 }
             }
         }
+    }
+
+    // 配对二维码弹窗（生成成功时展示，供另一台设备扫码接入）
+    state.pairCode?.let { pairCode ->
+        PairCodeDialog(data = pairCode, onDismiss = viewModel::dismissPairCode)
     }
 
     // 自动连接失败弹窗
@@ -334,3 +406,95 @@ fun ConnectScreen(
         )
     }
 }
+
+/**
+ * 一次性配对二维码弹窗：展示供另一台设备扫描的二维码与配对码。
+ * 有效期由服务端 TTL 决定（默认 120 秒、仅可使用一次），过期需关闭后重新生成。
+ */
+@Composable
+private fun PairCodeDialog(data: PairCodeData, onDismiss: () -> Unit) {
+    var remaining by remember(data.payload) { mutableIntStateOf(data.expiresInSeconds.coerceAtLeast(0)) }
+    LaunchedEffect(data.payload) {
+        while (remaining > 0) {
+            kotlinx.coroutines.delay(1000)
+            remaining--
+        }
+    }
+    val qrBitmap = remember(data.payload) { renderQrCodeBitmap(data.payload) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("配对二维码") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (qrBitmap != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(220.dp)
+                            .background(androidx.compose.ui.graphics.Color.White, RoundedCornerShape(16.dp))
+                            .padding(10.dp),
+                    ) {
+                        Image(
+                            bitmap = qrBitmap.asImageBitmap(),
+                            contentDescription = "配对二维码",
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "二维码渲染失败，请关闭后重试。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = "配对码 ${data.code}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = if (remaining > 0) "剩余 $remaining 秒，仅可使用一次" else "已过期，请关闭后重新生成",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (remaining > 0) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "在另一台设备的 MSLX App 连接页选择「扫码配对」扫描此二维码，" +
+                        "将自动创建独立凭据（默认 ${data.deviceTtlDays} 天有效，可在服务端随时撤销）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+    )
+}
+
+/** 用 zxing core 把文本渲染成二维码位图（白底黑码 + 1 模块静区，暗色主题下也能正常扫描）。 */
+private fun renderQrCodeBitmap(content: String, sizePx: Int = 720): android.graphics.Bitmap? = runCatching {
+    val matrix = com.google.zxing.qrcode.QRCodeWriter().encode(
+        content,
+        com.google.zxing.BarcodeFormat.QR_CODE,
+        sizePx,
+        sizePx,
+        mapOf(com.google.zxing.EncodeHintType.MARGIN to 1),
+    )
+    val pixels = IntArray(sizePx * sizePx) { index ->
+        val x = index % sizePx
+        val y = index / sizePx
+        if (matrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+    }
+    android.graphics.Bitmap.createBitmap(pixels, sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888)
+}.getOrNull()

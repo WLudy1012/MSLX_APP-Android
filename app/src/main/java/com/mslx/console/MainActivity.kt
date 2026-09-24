@@ -10,15 +10,20 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.mslx.console.data.AppSettings
 import com.mslx.console.data.ServerRef
@@ -26,6 +31,8 @@ import com.mslx.console.ui.ConnectivityHost
 import com.mslx.console.ui.ServerNotificationHelper
 import com.mslx.console.ui.navigation.AppNavHost
 import com.mslx.console.ui.navigation.Routes
+import com.mslx.console.ui.theme.GlassBackground
+import com.mslx.console.ui.theme.LocalGlassAlpha
 import com.mslx.console.ui.theme.MSLXConsoleTheme
 import com.mslx.console.ui.theme.ThemeConfig
 import com.mslx.console.ui.update.CrashReportDialog
@@ -88,27 +95,41 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            MSLXConsoleTheme(
-                themeConfig = ThemeConfig(
-                    mode = settings.themeMode,
-                    seedColor = settings.seedColor,
-                ),
-            ) {
-                AppNavHost(settings = settings, navController = navController)
-                // 全局更新弹窗：启动自动检查 + 手动检查结果都走这里
-                UpdateHost()
-                // 连接连通性监视：5 秒一轮，在线→离线弹窗提醒
-                ConnectivityHost()
-                // 崩溃报告弹窗：上次会话发生未捕获异常时展示
-                CrashReportDialog()
-                // 首次开屏免责协议：5 秒后可确认，同意后持久化（仅真实加载后渲染）
-                if (settingsState != null) {
-                    DisclaimerDialog(
-                        settings = settingsState!!,
-                        onAccept = {
-                            scope.launch { app.container.settingsStore.acceptDisclaimer() }
-                        },
-                    )
+            val themeConfig = ThemeConfig(
+                mode = settings.themeMode,
+                seedColor = settings.seedColor,
+                glassAlpha = settings.glassAlpha,
+                lightBackground = settings.lightBackgroundPath,
+                darkBackground = settings.darkBackgroundPath,
+            )
+            // 当前路由：毛玻璃背景的转场增强按页面变化触发
+            val routeEntry by navController.currentBackStackEntryAsState()
+
+            MSLXConsoleTheme(themeConfig = themeConfig) {
+                CompositionLocalProvider(LocalGlassAlpha provides themeConfig.glassAlpha) {
+                    Box(Modifier.fillMaxSize()) {
+                        // 毛玻璃背景层：所有页面共用（页面 Scaffold 保持透明以透出背景）
+                        GlassBackground(
+                            config = themeConfig,
+                            transitionKey = routeEntry?.destination?.route,
+                        )
+                        AppNavHost(settings = settings, navController = navController)
+                        // 全局更新弹窗：启动自动检查 + 手动检查结果都走这里
+                        UpdateHost()
+                        // 连接连通性监视：5 秒一轮，在线→离线弹窗提醒
+                        ConnectivityHost()
+                        // 崩溃报告弹窗：上次会话发生未捕获异常时展示
+                        CrashReportDialog()
+                        // 首次开屏免责协议：5 秒后可确认，同意后持久化（仅真实加载后渲染）
+                        if (settingsState != null) {
+                            DisclaimerDialog(
+                                settings = settingsState!!,
+                                onAccept = {
+                                    scope.launch { app.container.settingsStore.acceptDisclaimer() }
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }

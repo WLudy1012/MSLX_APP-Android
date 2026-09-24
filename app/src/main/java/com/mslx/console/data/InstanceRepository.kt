@@ -1,5 +1,6 @@
 package com.mslx.console.data
 
+import android.util.Base64
 import com.mslx.console.data.model.ActionRequest
 import com.mslx.console.data.model.CancelCreationRequest
 import com.mslx.console.data.model.CommandResultPayload
@@ -36,7 +37,9 @@ import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
 import retrofit2.HttpException
+import retrofit2.Response
 
 /** 实例相关的数据入口，封装 REST 调用与 SignalR 控制台客户端创建。 */
 class InstanceRepository {
@@ -414,4 +417,105 @@ class InstanceRepository {
         onStats: (com.mslx.console.data.model.NodeStatsPayload) -> Unit,
     ): SystemMonitorClient =
         SystemMonitorClient(baseUrl, apiKey, onStats)
+
+    // ---------------------------------------------------------------- 实例图标
+
+    /** 第三方状态 API 客户端（懒建，避免每个实例重复创建 OkHttpClient）。 */
+    private val mcsrvstatApi by lazy { ApiClient.buildMcsrvstatApi() }
+    private val mcstatusApi by lazy { ApiClient.buildMcstatusApi() }
+
+    /**
+     * 取实例图标（PNG 字节），三级来源依次回退：
+     * 1. Daemon 内置端点（实例目录 server-icon.png）；
+     * 2. 图标插件（Daemon 侧拉取 + 磁盘缓存 + 第三方查询）；
+     * 3. App 直连第三方状态 API（仅当实例在 server.properties 中显式配置了公网地址）。
+     * 全部无果返回 null，由调用方展示占位图；缓存策略见 [InstanceIconStore]。
+     */
+    suspend fun fetchInstanceIcon(id: Long): ByteArray? {
+        fetchIconBytes { requireApi().instanceIcon(id) }?.let { return it }
+        fetchIconBytes { requireApi().pluginServerIcon(id) }?.let { return it }
+        val address = resolvePublicAddress(id) ?: return null
+        return fetchThirdPartyIcon(address)
+    }
+
+    /** 执行一次图标请求：仅接受 2xx 且 Content-Type 为图片的响应（无图标时端点以 JSON + 4xx 承载业务码）。 */
+    private suspend fun fetchIconBytes(call: suspend () -> Response<ResponseBody>): ByteArray? =
+        runCatching {
+            val response = call()
+            if (!response.isSuccessful) return@runCatching null
+            if (!response.headers()["Content-Type"].orEmpty().startsWith("image/")) return@runCatching null
+            response.body()?.bytes()
+        }.getOrNull()
+
+    /** 第三方状态 API：mcsrvstat.us → mcstatus.io 回退，仅取 online + icon 两个字段。 */
+    private suspend fun fetchThirdPartyIcon(address: String): ByteArray? {
+        val primary = runCatching {
+            val resp = mcsrvstatApi.status(address)
+            if (resp.online) decodeIconDataUri(resp.icon) else null
+        }.getOrNull()
+        if (primary != null) return primary
+        return runCatching {
+            val resp = mcstatusApi.status(address)
+            if (resp.online) decodeIconDataUri(resp.icon) else null
+        }.getOrNull()
+    }
+
+    /** `data:image/png;base64,xxxx` 形式解码为 PNG 字节（格式不符返回 null）。 */
+    private fun decodeIconDataUri(dataUri: String?): ByteArray? {
+        if (dataUri.isNullOrBlank()) return null
+        val marker = dataUri.indexOf("base64,", ignoreCase = true)
+        if (marker < 0) return null
+        return runCatching { Base64.decode(dataUri.substring(marker + "base64,".length), Base64.DEFAULT) }
+            .getOrNull()
+    }
+
+    /**
+     * 从 server.properties 解析可外发查询的公网地址（`host` 或 `host:port`）。
+     * 未配置 server-ip / 私网地址 / 属性读取失败时返回 null（不发外网请求）。
+     */
+    private suspend fun resolvePublicAddress(id: Long): String? {
+        val text = fileContent(id, "server.properties").getOrNull() ?: return null
+        var host: String? = null
+        var port = 25565
+        text.lineSequence().forEach { raw ->
+            val line = raw.trim()
+            if (line.isEmpty() || line.startsWith("#")) return@forEach
+            val split = line.indexOf('=')
+            if (split <= 0) return@forEach
+            when (line.substring(0, split).trim()) {
+                "server-ip" -> host = line.substring(split + 1).trim()
+                "server-port" -> line.substring(split + 1).trim().toIntOrNull()
+                    ?.takeIf { it in 1..65535 }?.let { port = it }
+            }
+        }
+        val target = host?.takeIf { it.isNotBlank() } ?: return null
+        if (!isPublicHost(target)) return null
+        return if (port == 25565) target else "$target:$port"
+    }
+
+    /** 仅公网地址允许外发：排除私网/回环/链路本地/组播 IPv4 与内网域名（与 Daemon 图标插件同口径）。 */
+    private fun isPublicHost(host: String): Boolean {
+        if (host.contains(':')) {
+            val lower = host.lowercase()
+            return !(lower == "::1" || lower.startsWith("fe80") || lower.startsWith("fc") || lower.startsWith("fd"))
+        }
+        if (host.any { it.isLetter() }) {
+            val lower = host.lowercase()
+            if (lower == "localhost" || lower.endsWith(".localhost")) return false
+            return listOf(".local", ".lan", ".home", ".internal", ".intranet", ".localdomain")
+                .none { lower.endsWith(it) }
+        }
+        val parts = host.split('.')
+        if (parts.size != 4) return false
+        val bytes = parts.map { it.toIntOrNull()?.takeIf { v -> v in 0..255 } ?: return false }
+        return !(
+            bytes[0] == 10 ||
+                bytes[0] == 127 ||
+                (bytes[0] == 172 && bytes[1] in 16..31) ||
+                (bytes[0] == 192 && bytes[1] == 168) ||
+                (bytes[0] == 169 && bytes[1] == 254) ||
+                bytes[0] == 0 ||
+                bytes[0] >= 224
+            )
+    }
 }

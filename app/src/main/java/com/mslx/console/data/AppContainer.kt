@@ -6,7 +6,8 @@ import kotlinx.coroutines.flow.first
 
 /** 简易手动依赖注入容器。 */
 class AppContainer(context: Context) {
-    private val appContext = context.applicationContext
+    /** 应用级 Context（图标缓存等非 UI 组件需要）。 */
+    internal val appContext = context.applicationContext
 
     val settingsStore = SettingsStore(appContext)
 

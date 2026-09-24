@@ -28,11 +28,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mslx.console.R
-import com.mslx.console.ui.theme.BrandTeal
+import com.mslx.console.ui.theme.BrandSulfur
 import kotlinx.coroutines.delay
 
 /**
- * 应用内品牌开屏动画(承接系统 SplashScreen 的深青蓝背景，
+ * 应用内品牌开屏动画(承接系统 SplashScreen 的硫磺史莱姆黄绿背景，
  * 图标淡入 + 弹性缩放 + 应用名浮现)。
  */
 @Composable
@@ -59,15 +59,15 @@ fun SplashScreen(onFinished: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BrandTeal),
+            .background(BrandSulfur),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Image(
-                painter = painterResource(R.drawable.mslx_logo),
+                painter = painterResource(R.drawable.slime_logo),
                 contentDescription = "MSLX",
                 modifier = Modifier
-                    .size(132.dp)
+                    .size(144.dp)
                     .graphicsLayer {
                         scaleX = scale
                         scaleY = scale

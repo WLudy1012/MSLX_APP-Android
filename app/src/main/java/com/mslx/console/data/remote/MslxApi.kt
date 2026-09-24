@@ -13,6 +13,10 @@ import com.mslx.console.data.model.FrpSummary
 import com.mslx.console.data.model.InstanceInfo
 import com.mslx.console.data.model.InstanceSummary
 import com.mslx.console.data.model.LocalJava
+import com.mslx.console.data.model.PairCodeData
+import com.mslx.console.data.model.PairCodeRequest
+import com.mslx.console.data.model.PairRedeemData
+import com.mslx.console.data.model.PairRedeemRequest
 import com.mslx.console.data.model.PmListData
 import com.mslx.console.data.model.PmSetRequest
 import com.mslx.console.data.model.SaveFileRequest
@@ -154,4 +158,24 @@ interface MslxApi {
         @Path("id") id: Long,
         @Body body: SaveUploadRequest,
     ): ApiResponse<Any?>
+
+    // ---------------- 扫码配对（Daemon 插件 mslx-pair） ----------------
+
+    /** 生成一次性配对码（需要 admin 权限，TTL 120s）。 */
+    @POST("api/plugins/pair/codes")
+    suspend fun pairCreateCode(@Body body: PairCodeRequest): ApiResponse<PairCodeData>
+
+    /** 兑换配对码（匿名端点，插件内部做签名/时效/一次性/IP 限速校验）。 */
+    @POST("api/plugins/pair/redeem")
+    suspend fun pairRedeem(@Body body: PairRedeemRequest): ApiResponse<PairRedeemData>
+
+    // ---------------- 实例图标 ----------------
+
+    /** Daemon 内置图标端点：读取实例目录下的 server-icon.png（未放置时 404 + JSON）。 */
+    @GET("api/instance/icon/{id}.png")
+    suspend fun instanceIcon(@Path("id") id: Long): retrofit2.Response<okhttp3.ResponseBody>
+
+    /** 图标插件（mslx-icon）端点：Daemon 侧本地 → 磁盘缓存 → 第三方查询三级回退。 */
+    @GET("api/plugins/icon/server/{id}")
+    suspend fun pluginServerIcon(@Path("id") id: Long): retrofit2.Response<okhttp3.ResponseBody>
 }

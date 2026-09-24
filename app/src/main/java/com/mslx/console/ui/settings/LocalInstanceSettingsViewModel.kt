@@ -120,7 +120,7 @@ class LocalInstanceSettingsViewModel(
             }.getOrDefault(LocalGlobalDefaults())
             val abi = LocalJreManager.currentAbi()
             val installable = LocalJreManager.installableRuntimes(abi)
-            // 实例已保存但当前不可安装的运行时（如 Java 8）仍列入选项，
+            // 实例已保存但当前不可安装的运行时仍列入选项，
             // 否则下拉会默默显示成默认值，看不出实例原本配的是哪个
             val saved = LocalJreManager.runtimeById(meta.runtimeId.ifBlank { null })
             val runtimes = if (saved in installable) installable else installable + saved
@@ -182,7 +182,7 @@ class LocalInstanceSettingsViewModel(
 
     fun selectRuntime(id: String) {
         val rt = LocalJreManager.runtimeById(id)
-        // 暂无 Android 构建的运行时（如 Java 8）不受理，避免存下一个永远装不上的运行时
+        // 暂无 Android 构建的运行时不受理，避免存下一个永远装不上的运行时
         if (!rt.supported) {
             _message.tryEmit("${rt.label} 暂无 Android 构建，无法选用")
             return

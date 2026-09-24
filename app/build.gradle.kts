@@ -23,9 +23,9 @@ android {
         applicationId = "com.mslx.console"
         minSdk = 24
         targetSdk = 35
-        versionCode = 35
+        versionCode = 36
         // CI Actions 构建会以 -PversionName=x.x.x.x 覆盖（见 android.yml Compute Actions version）
-        versionName = (project.findProperty("versionName") as String?) ?: "1.7.2"
+        versionName = (project.findProperty("versionName") as String?) ?: "1.7.3"
 
         ndk {
             // arm64 真机 + x86_64 模拟器（本机开服调试用）
@@ -97,6 +97,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            // pack200 解包器（libunpack200.so）需要从 nativeLibraryDir **exec**：
+            // 必须解压安装（Android 10+ 只允许 exec nativeLibraryDir 里解压出来的文件），
+            // 与 ZalithLauncher/PojavLauncher 的配置一致。
+            useLegacyPackaging = true
+        }
     }
 
     androidResources {
@@ -149,6 +155,9 @@ dependencies {
     // 本机开服增强：Shizuku/ADB 权限下 exec 真正的 java 子进程
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
+
+    // 扫码配对：扫描 Daemon 端生成的一次性二维码换取受限 API Key
+    implementation(libs.zxing.embedded)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

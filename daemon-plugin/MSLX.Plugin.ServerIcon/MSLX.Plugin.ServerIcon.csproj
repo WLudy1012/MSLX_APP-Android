@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>MSLX.Plugin.ServerIcon</AssemblyName>
+    <Version>1.0.0</Version>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    MSLX.SDK 默认取仓库旁的上游源码（本地开发目录，不入库）。
+    如目录不同，构建时用 -p:MSLX_SDK_DIR=<SDK 目录> 覆盖。
+  -->
+  <PropertyGroup>
+    <MSLX_SDK_DIR Condition="'$(MSLX_SDK_DIR)' == ''">$(MSBuildThisFileDirectory)..\..\MSLX-dev\MSLX.SDK</MSLX_SDK_DIR>
+    <MSLX_SDK_DIR>$([System.IO.Path]::GetFullPath('$(MSLX_SDK_DIR)'))</MSLX_SDK_DIR>
+  </PropertyGroup>
+
+  <Target Name="CheckSdkDir" BeforeTargets="ResolveProjectReferences">
+    <Error Condition="!Exists('$(MSLX_SDK_DIR)\MSLX.SDK.csproj')" Text="未找到 MSLX.SDK 源码：$(MSLX_SDK_DIR)。请设置 MSLX_SDK_DIR 指向 MSLX.SDK.csproj 所在目录。" />
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="$(MSLX_SDK_DIR)\MSLX.SDK.csproj" />
+  </ItemGroup>
+
+</Project>

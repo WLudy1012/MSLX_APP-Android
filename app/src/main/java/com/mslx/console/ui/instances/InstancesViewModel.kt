@@ -1,11 +1,13 @@
 package com.mslx.console.ui.instances
 
 import android.app.Application
+import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppLogger
 import com.mslx.console.data.AppSettings
+import com.mslx.console.data.InstanceIcons
 import com.mslx.console.data.ManagedServer
 import com.mslx.console.data.ensureRepository
 import com.mslx.console.data.isStoppableStatus
@@ -23,6 +25,8 @@ data class InstancesUiState(
     val deleteError: String? = null,
     val error: String? = null,
     val servers: List<ManagedServer> = emptyList(),
+    /** 实例图标（key = [ManagedServer.key]）；未加载到的不显示（占位状态块）。 */
+    val icons: Map<String, Bitmap> = emptyMap(),
     /** 正在下发启停操作的实例 key（对应行按钮显示进度，避免重复下发）。 */
     val busyKeys: Set<String> = emptySet(),
     /** 一键停止全部进行中。 */
@@ -193,8 +197,10 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
             val settings = runCatching { store.settingsFlow.first() }.getOrDefault(AppSettings())
             runCatching { catalog.load(settings) }
                 .onSuccess { servers ->
+                    // 图标加载失败不影响列表本身：逐条回退占位块
+                    val icons = InstanceIcons.load(container, servers)
                     _state.update {
-                        it.copy(loading = false, refreshing = false, error = null, servers = servers)
+                        it.copy(loading = false, refreshing = false, error = null, servers = servers, icons = it.icons + icons)
                     }
                 }
                 .onFailure { e ->

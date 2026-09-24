@@ -25,8 +25,8 @@ object ApiClient {
             .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
-                    .addHeader("x-api-key", apiKey)
                     .addHeader("User-Agent", USER_AGENT)
+                    .apply { if (apiKey.isNotBlank()) addHeader("x-api-key", apiKey) }
                     .build()
                 chain.proceed(request)
             }
@@ -214,6 +214,41 @@ object ApiClient {
     }
 
     /**
+     * 构建第三方服务器状态查询客户端（mcsrvstat.us / mcstatus.io，公开接口无需认证）。
+     *
+     * 与其它公开 API 客户端一致：不启用「信任所有证书」（那只用于用户自部署的 Daemon）。
+     */
+    private fun <T> buildServerStatusApi(baseUrl: String, service: Class<T>): T {
+        val client = OkHttpClient.Builder()
+            .addInterceptor(httpLoggingInterceptor())
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Accept", "application/json")
+                    .addHeader("User-Agent", USER_AGENT)
+                    .build()
+                chain.proceed(request)
+            }
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .build()
+
+        return Retrofit.Builder()
+            .baseUrl(baseUrl)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(service)
+    }
+
+    /** 第三方服务器状态 API：mcsrvstat.us（图标来源首选）。 */
+    fun buildMcsrvstatApi(): McsrvstatApi =
+        buildServerStatusApi("https://api.mcsrvstat.us/", McsrvstatApi::class.java)
+
+    /** 第三方服务器状态 API：mcstatus.io（mcsrvstat.us 无结果时回退）。 */
+    fun buildMcstatusApi(): McstatusApi =
+        buildServerStatusApi("https://api.mcstatus.io/", McstatusApi::class.java)
+
+    /**
      * 规范化 Daemon 地址：
      * - trim + trimEnd('/')；
      * - 无协议前缀（忽略大小写）时补 https://；
@@ -230,6 +265,23 @@ object ApiClient {
             url = "https://" + url.substringAfter("://", url)
         }
         return url
+    }
+
+    /**
+     * 尽力从请求异常中提取 Daemon 统一响应体的 message 文案。
+     *
+     * Retrofit 对 HTTP 非 2xx 抛 HttpException，业务 message 在 errorBody 里
+     * （插件端点以 HTTP 状态码承载业务码，如 410 配对码过期）；提取失败返回 null，
+     * 由调用方回退到异常自身文案。
+     */
+    fun errorMessageFrom(throwable: Throwable): String? {
+        val http = throwable as? retrofit2.HttpException ?: return null
+        val body = runCatching { http.response()?.errorBody()?.string() }.getOrNull()
+        if (body.isNullOrBlank()) return null
+        val message = runCatching {
+            com.google.gson.Gson().fromJson(body, com.mslx.console.data.model.ApiResponse::class.java)?.message
+        }.getOrNull()
+        return message?.takeIf { it.isNotBlank() }
     }
 
     private fun ensureTrailingSlash(url: String): String =

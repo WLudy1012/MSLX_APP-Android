@@ -137,6 +137,13 @@ class LocalJvmLauncher(
     private fun buildOptions(resolved: ServerEntrypoint.Resolved, javaHome: File): List<String> {
         val classpath = resolved.classpath.joinToString(File.pathSeparator) { it.absolutePath }
         val tmpDir = File(workDir, "tmp").apply { mkdirs() }
+        // Java 8 的 native 库在 `lib/<arch>[/server]`（如 lib/aarch64/server/libjvm.so），
+        // 17/21/25 平铺在 `lib[/server]`；两种布局的候选都列上（不存在的路径无害）。
+        val libPath = listOf(
+            "lib", "lib/server",
+            "lib/aarch64", "lib/aarch64/server",
+            "lib/amd64", "lib/amd64/server",
+        ).joinToString(File.pathSeparator) { File(javaHome, it).absolutePath }
         return buildList {
             add("-Xms${minMemM}M")
             add("-Xmx${maxMemM}M")
@@ -144,7 +151,7 @@ class LocalJvmLauncher(
             if (useSerialGc) add("-XX:+UseSerialGC")
             add("-Djava.home=${javaHome.absolutePath}")
             add("-Djava.class.path=$classpath")
-            add("-Djava.library.path=${javaHome.absolutePath}/lib:${javaHome.absolutePath}/lib/server")
+            add("-Djava.library.path=$libPath")
             add("-Djava.io.tmpdir=${tmpDir.absolutePath}")
             add("-Duser.home=${workDir.absolutePath}")
             add("-Duser.dir=${workDir.absolutePath}")

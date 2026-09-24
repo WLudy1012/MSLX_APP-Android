@@ -16,15 +16,18 @@ import java.util.zip.ZipInputStream
 /**
  * Android JRE 运行时管理（**多版本注册表**）。
  *
- * 来源：上游 PojavLauncher 的 Android OpenJDK 构建（bionic，arm64-v8a / x86_64），
- * 发行包为 `.tar.xz`，解包后根目录即 `bin/ lib/ conf/`（Java 8 无 `conf/`、无 `lib/modules`）。
+ * 来源：PojavLauncher / FCL / ZalithLauncher 等项目维护的 Android OpenJDK 构建
+ * （bionic，arm64-v8a / x86_64），发行包为 `.tar.xz`，解包后根目录即 `bin/ lib/ conf/`
+ * （Java 8 无 `conf/`、无 `lib/modules`，类库以 `.jar.pack` 形式分发）。
  *
- * 覆盖常用 Java 版本 8 / 17 / 21（见 [RUNTIMES]），但只有**确实存在 Android/bionic 构建**的版本
- * 才置 [JavaRuntime.supported]（Java 8 目前没有，UI 标为不可用，避免用户点了才吃 404）。
- * 每个版本按 ABI 提供下载源，顺序为「项目自托管 CNB 镜像 → 外部镜像 / 上游 GitHub」。
- * SHA-256 **可选**：留空则跳过哈希校验，
- * 改用结构校验（`libjvm.so` 存在 + 版本标志文件），并打印告警——维护者上传归档后可用
- * `fetch-jre-assets.ps1` 的 `Get-FileHash` 结果回填。
+ * 覆盖 Java 版本 8 / 17 / 21 / 25（见 [RUNTIMES]）。每个版本按 ABI 提供下载源，
+ * 顺序为「项目自托管 CNB 镜像 → 外部镜像 / 上游 GitHub」；SHA-256 **可选**：留空则跳过
+ * 哈希校验，改用结构校验（`libjvm.so` 存在 + 版本标志文件）并打印告警——维护者上传镜像后
+ * 可用 `fetch-jre-assets.ps1` 的 `Get-FileHash` 结果回填。
+ *
+ * Java 8 特殊：归档为「universal（类库）+ bin-<abi>（二进制）」两个包，解开后还需把
+ * `.jar.pack` 还原成 `.jar`（见 [AbiSpec.needsUnpack200]，由随 APK 安装的
+ * `libunpack200.so` 完成，见 [unpackPacks]）。
  *
  * 进程内 JVM 只依赖 `libjvm.so` 与（9+）`lib/modules`：JVM 由 native 层 dlopen +
  * JNI_CreateJavaVM 在 **App 进程内**起，不 exec `bin/java`（Android 10+ 禁止 targetSdk≥29
@@ -57,17 +60,56 @@ object LocalJreManager {
      */
     private const val FCL_JRE_MIRROR = "https://pan.huang1111.cn/f/eWkQI1"
 
-    /** 某个 ABI 的运行时归档：内嵌名 / 下载源（按序尝试）/ SHA-256（可空=跳过哈希校验）。 */
-    data class AbiSpec(
+    /**
+     * ZalithLauncher 2 内置运行时归档根（Android/bionic，其仓库
+     * `ZalithLauncher/src/main/assets/runtimes/<jre-N>/`）：jsDelivr CDN 优先，GitHub raw 兜底。
+     * Java 8 归档来自这里（OpenJDK 8u442 的 bionic 构建，GPL 系列许可）。
+     */
+    private const val ZALITH_RUNTIME_CDN =
+        "https://cdn.jsdelivr.net/gh/ZalithLauncher/ZalithLauncher2@main/ZalithLauncher/src/main/assets/runtimes"
+    private const val ZALITH_RUNTIME_RAW =
+        "https://raw.githubusercontent.com/ZalithLauncher/ZalithLauncher2/main/ZalithLauncher/src/main/assets/runtimes"
+
+    /**
+     * pack200 解包器（Java 8 类库还原用）。随 APK 的 jniLibs 分发（见 app/src/main/jniLibs），
+     * 安装后位于 `nativeLibraryDir`——只有那里的文件允许 exec（Android 10+ 禁止 exec 应用
+     * data 目录里的文件）。
+     */
+    private const val UNPACK200_LIB = "libunpack200.so"
+
+    /** 一个运行时归档：内嵌名 / 下载源（按序尝试）/ SHA-256（可空=跳过哈希校验）。 */
+    data class AbiArchive(
         val assetName: String,
         val sources: List<String>,
         val sha256: String = "",
     )
 
     /**
+     * 某个 ABI 的运行时规格：一个或多个归档 + 可选后处理。
+     *
+     * 多数版本只有一个归档；**Java 8 是两个**：`universal`（类库，含 `lib/rt.jar.pack`）+
+     * `bin-<abi>`（平台二进制），两者解包到同一目录。
+     *
+     * @param extraArchives 追加归档（与主归档 [assetName] 一起按序解包到同一目录）。
+     * @param needsUnpack200 解包后是否要用内置 `libunpack200.so` 把 `.pack` 还原为 `.jar`
+     *   （Java 8 类库以 pack200 压缩分发；Java 9+ 已取消该格式）。
+     */
+    data class AbiSpec(
+        val assetName: String,
+        val sources: List<String>,
+        val sha256: String = "",
+        val extraArchives: List<AbiArchive> = emptyList(),
+        val needsUnpack200: Boolean = false,
+    ) {
+        /** 全部归档（主归档在前）。 */
+        val allArchives: List<AbiArchive>
+            get() = listOf(AbiArchive(assetName, sources, sha256)) + extraArchives
+    }
+
+    /**
      * 一个 Java 运行时版本规格。
-     * @param id 安装目录名（= runtimeId），如 `jre8` / `jre17` / `jre21`。
-     * @param javaMajor Java 主版本（8 / 17 / 21）。
+     * @param id 安装目录名（= runtimeId），如 `jre8` / `jre17` / `jre21` / `jre25`。
+     * @param javaMajor Java 主版本（8 / 17 / 21 / 25）。
      * @param label UI 展示名。
      * @param hasModules Java 9+ 有 `lib/modules`；Java 8 无（用 `lib/rt.jar`）。
      * @param specs 归一化 ABI（`arm64-v8a` / `x86_64`）→ 归档规格；缺该键即该 ABI 不支持。
@@ -94,12 +136,13 @@ object LocalJreManager {
     }
 
     /**
-     * Java 8（仅 arm64，且**需维护者向 CNB 镜像上传 Android/bionic 构建**）。
+     * Java 8（arm64 + x86_64，1.16 及更早的原版/插件/模组服）。
      *
-     * 注意：上游 android-openjdk-build-multiarch 的 `jre8-40df388` / `jre8-99f3f8b` 两个
-     * Release 是 **iOS/macOS 专用**（归档内是 `lib` 下的 `.dylib`，文件名里的 arm64 指 Apple 主
-     * 机），在 Android 上完全不可用，因此这里不挂上游回退源；该仓库当前只有
-     * `jre17-ec28559`（JRE17 for Android）能直接用。
+     * 归档取自 ZalithLauncher 2 内置运行时（OpenJDK 8u442 的 Android/bionic 构建，
+     * GPL 系列许可；来源与构建见 ZalithLauncher2 仓库 runtimes/jre-8）：
+     * `universal.tar.xz`（架构无关类库）+ `bin-<abi>.tar.xz`（平台二进制）。
+     * 解包后类库是 `.jar.pack`，由 [unpackPacks] 用内置 `libunpack200.so` 还原；
+     * 项目自托管 CNB / GitHub 镜像可挂同名归档（选传，404 自动跳到 Zalith 源）。
      */
     val JRE8 = JavaRuntime(
         id = "jre8",
@@ -108,14 +151,52 @@ object LocalJreManager {
         hasModules = false,
         specs = mapOf(
             "arm64-v8a" to AbiSpec(
-                assetName = "jre8-arm64-20220811-release.tar.xz",
+                assetName = "jre8-universal.tar.xz",
                 sources = listOf(
-                    "$CNB_JRE_MIRROR_BASE/jre8-arm64-20220811-release.tar.xz",
+                    "$CNB_JRE_MIRROR_BASE/jre8-universal.tar.xz",
+                    "$GITHUB_JRE_MIRROR_BASE/jre8-universal.tar.xz",
+                    "$ZALITH_RUNTIME_CDN/jre-8/universal.tar.xz",
+                    "$ZALITH_RUNTIME_RAW/jre-8/universal.tar.xz",
                 ),
-                sha256 = "", // 镜像上传后用 Get-FileHash 回填
+                sha256 = "150072cfa1d9e037c31e4bf9770aa5470ae46d0bfefd366b7ce5b2f940ede3f3",
+                extraArchives = listOf(
+                    AbiArchive(
+                        assetName = "jre8-arm64-bin.tar.xz",
+                        sources = listOf(
+                            "$CNB_JRE_MIRROR_BASE/jre8-arm64-bin.tar.xz",
+                            "$GITHUB_JRE_MIRROR_BASE/jre8-arm64-bin.tar.xz",
+                            "$ZALITH_RUNTIME_CDN/jre-8/bin-arm64.tar.xz",
+                            "$ZALITH_RUNTIME_RAW/jre-8/bin-arm64.tar.xz",
+                        ),
+                        sha256 = "deed9083a1047af1afaf2d7f1a2de4ae39fadf62c52881f075793e80274956cf",
+                    ),
+                ),
+                needsUnpack200 = true,
+            ),
+            "x86_64" to AbiSpec(
+                assetName = "jre8-universal.tar.xz",
+                sources = listOf(
+                    "$CNB_JRE_MIRROR_BASE/jre8-universal.tar.xz",
+                    "$GITHUB_JRE_MIRROR_BASE/jre8-universal.tar.xz",
+                    "$ZALITH_RUNTIME_CDN/jre-8/universal.tar.xz",
+                    "$ZALITH_RUNTIME_RAW/jre-8/universal.tar.xz",
+                ),
+                sha256 = "150072cfa1d9e037c31e4bf9770aa5470ae46d0bfefd366b7ce5b2f940ede3f3",
+                extraArchives = listOf(
+                    AbiArchive(
+                        assetName = "jre8-x86_64-bin.tar.xz",
+                        sources = listOf(
+                            "$CNB_JRE_MIRROR_BASE/jre8-x86_64-bin.tar.xz",
+                            "$GITHUB_JRE_MIRROR_BASE/jre8-x86_64-bin.tar.xz",
+                            "$ZALITH_RUNTIME_CDN/jre-8/bin-x86_64.tar.xz",
+                            "$ZALITH_RUNTIME_RAW/jre-8/bin-x86_64.tar.xz",
+                        ),
+                        sha256 = "37c3f7214ce3086575d7210baa25aee130d8db28c57739f598d24dfbfff32612",
+                    ),
+                ),
+                needsUnpack200 = true,
             ),
         ),
-        supported = false,
     )
 
     /** Java 17（arm64 + x86_64，URL 与 SHA-256 均已验证）。 */
@@ -170,8 +251,34 @@ object LocalJreManager {
         ),
     )
 
+    /**
+     * Java 25（Minecraft 26.x 及以后，arm64）。
+     *
+     * 归档取自 FCL 下载站（bionic Android 构建，已核对 ELF：e_machine=183 AArch64、
+     * 解释器 `/system/bin/linker64`、`lib/modules` 存在），本地 `Get-FileHash` 得到
+     * SHA-256 后固定；下载顺序：项目自托管 CNB 镜像 → GitHub Release → FCL 直链。
+     * 该上游不提供 x86_64 构建，故只注册 arm64-v8a。
+     */
+    val JRE25 = JavaRuntime(
+        id = "jre25",
+        javaMajor = 25,
+        label = "Java 25",
+        hasModules = true,
+        specs = mapOf(
+            "arm64-v8a" to AbiSpec(
+                assetName = "jre25-arm64-20260223-release.tar.xz",
+                sources = listOf(
+                    "$CNB_JRE_MIRROR_BASE/jre25-arm64-20260223-release.tar.xz",
+                    "$GITHUB_JRE_MIRROR_BASE/jre25-arm64-20260223-release.tar.xz",
+                    "$FCL_JRE_MIRROR/jre25-arm64-20260223-release.tar.xz",
+                ),
+                sha256 = "0fdf6d19fe66ea61c12caa24bd655227ddb0d7d9c16c0f13281a7c2878635286",
+            ),
+        ),
+    )
+
     /** 全部受支持运行时（按版本升序）。 */
-    val RUNTIMES: List<JavaRuntime> = listOf(JRE8, JRE17, JRE21)
+    val RUNTIMES: List<JavaRuntime> = listOf(JRE8, JRE17, JRE21, JRE25)
 
     /** 默认运行时（离线内嵌、最稳）。 */
     val DEFAULT_RUNTIME: JavaRuntime = JRE17
@@ -238,7 +345,7 @@ object LocalJreManager {
     /** 不可安装原因（null = 可装）：统一给可直接展示给用户的中文提示。 */
     fun installBlockReason(runtime: JavaRuntime, abi: String = currentAbi()): String? {
         if (!runtime.supported) {
-            return "${runtime.label} 暂无 Android（bionic）构建：上游只发布了 iOS/macOS 产物，无法在本机安装"
+            return "${runtime.label} 暂无 Android（bionic）构建，无法在本机安装"
         }
         if (runtime.spec(normalizeAbi(abi)) == null) {
             return "${runtime.label} 暂无当前设备架构（$abi）的运行时归档"
@@ -285,6 +392,7 @@ object LocalJreManager {
         "jre/lib/server/libjvm.so",
         "lib/aarch64/server/libjvm.so",
         "lib/x86_64/server/libjvm.so",
+        "lib/amd64/server/libjvm.so",
         "lib/arm64/server/libjvm.so",
     )
 
@@ -357,44 +465,15 @@ object LocalJreManager {
             home.deleteRecursively()
             home.mkdirs()
             try {
-                val embedded = embeddedArchive(context, runtime, spec, abi)
-                if (embedded != null) {
-                    AppLogger.i("LocalJre", "从内嵌 assets 安装 ${runtime.label}：${spec.assetName}")
-                    extractAndVerify(embedded.first, embedded.second, spec, home, runtime, onProgress)
-                } else {
-                    if (spec.sha256.isBlank()) {
-                        AppLogger.w(
-                            "LocalJre",
-                            "${runtime.label}（$abi）未配置 SHA-256：将跳过哈希校验，仅做结构校验（建议维护者回填）",
-                        )
-                    }
-                    val tmp = File(context.cacheDir, spec.assetName)
-                    var lastError: Throwable? = null
-                    var done = false
-                    for (url in spec.sources) {
-                        try {
-                            AppLogger.i("LocalJre", "下载 ${runtime.label} 运行时：$url")
-                            LocalDownloader.download(url, tmp, spec.sha256.ifBlank { null }) { onProgress(it * 0.5f) }
-                            onProgress(0.5f)
-                            extractAndVerify({ FileInputStream(tmp) }, tmp.length(), spec, home, runtime) { p ->
-                                onProgress(0.5f + p * 0.5f)
-                            }
-                            done = true
-                            break
-                        } catch (e: Exception) {
-                            lastError = e
-                            AppLogger.w("LocalJre", "运行时下载源失败，尝试下一个：$url", e)
-                            tmp.delete()
-                        }
-                    }
-                    tmp.delete()
-                    if (!done) {
-                        throw IllegalStateException(
-                            "所有下载源均失败（已尝试 ${spec.sources.size} 个源，最后：${lastError?.message ?: "未知错误"}）。" +
-                                "若为 404，说明该运行时归档尚未上传到镜像，请按 fetch-jre-assets.ps1 流程补齐并重填 SHA-256。",
-                            lastError,
-                        )
-                    }
+                val archives = spec.allArchives
+                val perArchive = 1f / archives.size
+                archives.forEachIndexed { index, archive ->
+                    val base = index * perArchive
+                    installArchive(context, runtime, archive, home) { p -> onProgress(base + p * perArchive) }
+                }
+                if (spec.needsUnpack200) {
+                    unpackPacks(context, runtime, home)
+                    onProgress(1f)
                 }
                 if (!isInstalled(context, runtime)) {
                     throw IllegalStateException(
@@ -403,7 +482,8 @@ object LocalJreManager {
                     )
                 }
                 markerFile(context, runtime).writeText(
-                    "${runtime.id}/${abi}\n${spec.sha256.ifBlank { "unverified" }}\n",
+                    "${runtime.id}/${abi}\n" +
+                        spec.allArchives.joinToString(";") { it.sha256.ifBlank { "unverified" } } + "\n",
                 )
             } catch (e: Exception) {
                 home.deleteRecursively()
@@ -415,22 +495,121 @@ object LocalJreManager {
     }
 
     /** 内嵌归档：存在则返回 (流工厂, 长度)，否则 null。 */
-    private fun embeddedArchive(
-        context: Context,
-        runtime: JavaRuntime,
-        spec: AbiSpec,
-        abi: String,
-    ): Pair<() -> InputStream, Long>? {
-        if (!hasEmbeddedAsset(context, runtime, abi)) return null
-        val path = "$ASSET_DIR/${spec.assetName}"
+    private fun embeddedArchive(context: Context, assetName: String): Pair<() -> InputStream, Long>? {
+        val assets = context.assets.list(ASSET_DIR).orEmpty()
+        if (assets.none { it == assetName }) return null
+        val path = "$ASSET_DIR/$assetName"
         val length = runCatching { context.assets.openFd(path).length }.getOrDefault(-1L)
         return { context.assets.open(path) } to length
+    }
+
+    /** 安装单个归档：内嵌 assets 优先，其次按源下载；[onProgress] 覆盖该归档的 0→1。 */
+    private suspend fun installArchive(
+        context: Context,
+        runtime: JavaRuntime,
+        archive: AbiArchive,
+        home: File,
+        onProgress: (Float) -> Unit,
+    ) {
+        val embedded = embeddedArchive(context, archive.assetName)
+        if (embedded != null) {
+            AppLogger.i("LocalJre", "从内嵌 assets 安装 ${runtime.label}：${archive.assetName}")
+            extractAndVerify(embedded.first, embedded.second, archive, home, runtime, onProgress)
+            return
+        }
+        if (archive.sha256.isBlank()) {
+            AppLogger.w(
+                "LocalJre",
+                "${runtime.label}（${archive.assetName}）未配置 SHA-256：将跳过哈希校验，仅做结构校验（建议维护者回填）",
+            )
+        }
+        val tmp = File(context.cacheDir, archive.assetName)
+        var lastError: Throwable? = null
+        var done = false
+        for (url in archive.sources) {
+            try {
+                AppLogger.i("LocalJre", "下载 ${runtime.label} 运行时：$url")
+                LocalDownloader.download(url, tmp, archive.sha256.ifBlank { null }) { onProgress(it * 0.5f) }
+                onProgress(0.5f)
+                extractAndVerify({ FileInputStream(tmp) }, tmp.length(), archive, home, runtime) { p ->
+                    onProgress(0.5f + p * 0.5f)
+                }
+                done = true
+                break
+            } catch (e: Exception) {
+                lastError = e
+                AppLogger.w("LocalJre", "运行时下载源失败，尝试下一个：$url", e)
+                tmp.delete()
+            }
+        }
+        tmp.delete()
+        if (!done) {
+            throw IllegalStateException(
+                "所有下载源均失败（已尝试 ${archive.sources.size} 个源，最后：${lastError?.message ?: "未知错误"}）。" +
+                    "若为 404，说明该运行时归档尚未上传到镜像，请按 fetch-jre-assets.ps1 流程补齐并重填 SHA-256。",
+                lastError,
+            )
+        }
+    }
+
+    /**
+     * 把运行时目录里的 `.jar.pack` 全部还原为 `.jar`（Java 8 的类库打包格式，9+ 已取消）。
+     *
+     * 解包器是随 APK 安装的 [UNPACK200_LIB]（jniLibs 打包，`nativeLibraryDir` 下才允许
+     * exec）；`-r` 让解包器在成功后删除 `.pack` 源文件（rt.jar.pack 等，省 ~20MB）。
+     */
+    private suspend fun unpackPacks(context: Context, runtime: JavaRuntime, home: File) =
+        withContext(Dispatchers.IO) {
+            val exe = File(context.applicationInfo.nativeLibraryDir, UNPACK200_LIB)
+            if (!exe.isFile) {
+                throw IllegalStateException(
+                    "${runtime.label} 需要 pack200 解包，但 APK 缺少 $UNPACK200_LIB（ABI 不匹配？），无法完成安装",
+                )
+            }
+            val packs = home.walkTopDown().filter { it.isFile && it.extension == "pack" }.toList()
+            if (packs.isEmpty()) {
+                AppLogger.w("LocalJre", "${runtime.label} 未发现 .pack 文件，跳过 pack200 解包")
+                return@withContext
+            }
+            AppLogger.i("LocalJre", "pack200 解包：${packs.size} 个文件（${runtime.label}）")
+            for (pack in packs) {
+                val dest = File(pack.parentFile, pack.name.removeSuffix(".pack"))
+                val process = ProcessBuilder(exe.absolutePath, "-r", pack.absolutePath, dest.absolutePath)
+                    .directory(exe.parentFile)
+                    .redirectErrorStream(true)
+                    .start()
+                // 先读尽输出（进程结束即 EOF），避免写缓冲写满互相等待
+                val output = runCatching { process.inputStream.bufferedReader().readText() }.getOrDefault("")
+                val code = process.waitFor()
+                if (code != 0) {
+                    throw IllegalStateException(
+                        "pack200 解包失败（exit=$code）：${pack.name}" +
+                            output.trim().takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty(),
+                    )
+                }
+            }
+            postUnpack(runtime, home)
+        }
+
+    /**
+     * 解包后修整（与 ZalithLauncher / PojavLauncher 的处理对齐）：部分归档的 libfreetype
+     * 带版本后缀（`libfreetype.so.6`），JVM 按 SONAME 找无后缀名。
+     */
+    private fun postUnpack(runtime: JavaRuntime, home: File) {
+        home.walkTopDown().filter { it.isFile && it.name == "libfreetype.so.6" }.forEach { ftIn ->
+            val ftOut = File(ftIn.parentFile, "libfreetype.so")
+            if (!ftOut.exists() || ftOut.length() != ftIn.length()) {
+                if (!ftIn.renameTo(ftOut)) {
+                    AppLogger.w("LocalJre", "${runtime.label} freetype 重命名失败：${ftIn.path}")
+                }
+            }
+        }
     }
 
     private fun extractAndVerify(
         open: () -> InputStream,
         totalBytes: Long,
-        spec: AbiSpec,
+        archive: AbiArchive,
         dest: File,
         runtime: JavaRuntime,
         onProgress: (Float) -> Unit,
@@ -438,16 +617,16 @@ object LocalJreManager {
         val digest = MessageDigest.getInstance("SHA-256")
         open().use { raw ->
             val counting = CountingInputStream(raw, totalBytes, digest, onProgress)
-            if (spec.assetName.endsWith(".zip")) extractZip(counting, dest) else extractTarXz(counting, dest)
+            if (archive.assetName.endsWith(".zip")) extractZip(counting, dest) else extractTarXz(counting, dest)
             // 关键：tar/zip 解析在归档结束标记处就停止，不会读尽底层流。
             // 必须把剩余字节读尽，否则 SHA-256 只覆盖了文件前缀，导致校验误报失败。
             counting.readToEof()
         }
         // SHA-256 可选：留空则跳过（改用安装后的结构校验兜底）
-        if (spec.sha256.isNotBlank()) {
+        if (archive.sha256.isNotBlank()) {
             val actual = digest.digest().joinToString("") { "%02x".format(it) }
-            if (!actual.equals(spec.sha256, ignoreCase = true)) {
-                throw IllegalStateException("${runtime.label} 归档 SHA-256 校验失败：期望 ${spec.sha256}，实际 $actual")
+            if (!actual.equals(archive.sha256, ignoreCase = true)) {
+                throw IllegalStateException("${runtime.label} 归档 SHA-256 校验失败：期望 ${archive.sha256}，实际 $actual")
             }
         }
     }
@@ -514,8 +693,11 @@ object LocalJreManager {
         }
     }
 
-    /** 解压 .tar.xz（上游格式）；软链按目标内容落成普通文件（上游仅 legal/ 下有）。 */
+    /** 解压 .tar.xz（上游格式）；软链按目标内容落成普通文件（如 Java 8 的 libjsig.so 链）。 */
     private fun extractTarXz(input: InputStream, dest: File) {
+        // 软链可能排在真实文件之前（lib/aarch64/server/libjsig.so → ../libjsig.so），
+        // 先处理的会因目标尚不存在而跳过；此时记为待办，解包结束后统一补做。
+        val deferredLinks = mutableListOf<Pair<String, String>>()
         TarArchiveInputStream(XZCompressorInputStream(input)).use { tar ->
             var entry = tar.nextEntry
             while (entry != null) {
@@ -525,13 +707,7 @@ object LocalJreManager {
 
                     entry.isSymbolicLink -> {
                         val link = entry.linkName.orEmpty()
-                        val base = File(dest, name).parentFile ?: dest
-                        val target = File(base, link).canonicalFile
-                        if (target.isFile && target.canonicalPath.startsWith(dest.canonicalPath + File.separator)) {
-                            val out = safeResolve(dest, name)
-                            out.parentFile?.mkdirs()
-                            target.copyTo(out, overwrite = true)
-                        }
+                        if (!materializeLink(dest, name, link)) deferredLinks += name to link
                     }
 
                     else -> {
@@ -543,6 +719,19 @@ object LocalJreManager {
                 entry = tar.nextEntry
             }
         }
+        for ((name, link) in deferredLinks) materializeLink(dest, name, link)
+    }
+
+    /** 把软链实体化为目标内容的普通文件；目标不存在或越界返回 false（安全防线同 [safeResolve]）。 */
+    private fun materializeLink(dest: File, name: String, link: String): Boolean {
+        val base = File(dest, name).parentFile ?: dest
+        val target = File(base, link).canonicalFile
+        if (!target.isFile) return false
+        if (!target.canonicalPath.startsWith(dest.canonicalPath + File.separator)) return false
+        val out = safeResolve(dest, name)
+        out.parentFile?.mkdirs()
+        target.copyTo(out, overwrite = true)
+        return true
     }
 
     /** 解压 .zip（第三方来源兜底）。 */

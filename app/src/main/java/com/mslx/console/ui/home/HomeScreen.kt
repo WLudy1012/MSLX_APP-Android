@@ -1,5 +1,7 @@
 package com.mslx.console.ui.home
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +53,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,6 +64,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.ManagedServer
 import com.mslx.console.data.ServerRef
 import com.mslx.console.ui.statusColor
+import com.mslx.console.ui.theme.GlassSurface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -94,6 +99,8 @@ fun HomeScreen(
     }
 
     Scaffold(
+        // 页面透明：透出全局毛玻璃背景层
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
@@ -143,6 +150,7 @@ fun HomeScreen(
                     items(state.visibleServers, key = { it.key }) { server ->
                         ServerRow(
                             server = server,
+                            icon = state.icons[server.key],
                             highlighted = server.ref?.daemonId == state.selectedDaemonId,
                             onClick = { server.ref?.let(onOpenServer) },
                             modifier = Modifier.animateItem(),
@@ -332,7 +340,7 @@ private fun DaemonCard(
     onEdit: () -> Unit,
     onOpenInstances: () -> Unit,
 ) {
-    Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxSize()) {
+    GlassSurface(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OnlineDot(page.online)
@@ -470,10 +478,11 @@ private fun ServersSectionHeader(
     }
 }
 
-/** 聚合列表里的一个实例：来源徽标 + 状态 + 负载摘要，点开直达所属服务端的控制台。 */
+/** 聚合列表里的一个实例：图标/状态点 + 来源 + 负载摘要，点开直达所属服务端的控制台。 */
 @Composable
 private fun ServerRow(
     server: ManagedServer,
+    icon: Bitmap?,
     highlighted: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -495,13 +504,43 @@ private fun ServerRow(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(statusColor(statusCode)),
-            )
-            Spacer(Modifier.width(12.dp))
+            if (icon != null) {
+                Box {
+                    Image(
+                        bitmap = icon.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                    )
+                    // 右下角状态点（带描边环）：图标不遮挡运行状态
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(12.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surface),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(statusColor(statusCode)),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(statusColor(statusCode)),
+                )
+                Spacer(Modifier.width(12.dp))
+            }
             Column(Modifier.weight(1f)) {
                 Text(
                     text = server.name,

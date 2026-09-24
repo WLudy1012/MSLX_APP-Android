@@ -17,6 +17,7 @@ coil = "2.7.0"
 xz = "1.10"
 commonsCompress = "1.27.1"
 shizuku = "13.1.5"
+zxingEmbedded = "4.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -48,6 +49,8 @@ commons-compress = { group = "org.apache.commons", name = "commons-compress", ve
 # 本机开服增强：Shizuku/ADB 权限下 exec 真正的 java 子进程（多实例/可重启/跨版本）
 shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
 shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
+# 扫码配对：zxing-android-embedded（按需拉起扫描页，进入时请求相机权限，无常驻相机）
+zxing-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxingEmbedded" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

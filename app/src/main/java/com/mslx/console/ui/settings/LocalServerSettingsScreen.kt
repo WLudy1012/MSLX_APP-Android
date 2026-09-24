@@ -52,6 +52,8 @@ fun LocalServerSettingsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
+        // 页面透明：透出全局毛玻璃背景层
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("本机运行时与开服设置") },
@@ -71,7 +73,7 @@ fun LocalServerSettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             Text(
-                "本机开服默认在 App 进程内启动 JVM；运行时可选 Java 17 / 21（Java 8 暂无 Android 构建）。开启「增强模式(Shizuku)」后以独立子进程运行，支持多实例并发、停止后免重启 App 再起。",
+                "本机开服默认在 App 进程内启动 JVM；运行时可选 Java 8 / 17 / 21 / 25。开启「增强模式(Shizuku)」后以独立子进程运行，支持多实例并发、停止后免重启 App 再起。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -206,7 +208,7 @@ fun LocalServerSettingsScreen(
                         Column(Modifier.weight(1f)) {
                             Text("以 shell 权限运行真正的 java 子进程", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                "开启后服务端跑在独立子进程：可多实例并发、停止后无需重启 App 即可再起、支持 Java 17 / 21。需先安装并授权 Shizuku；不可用时启动会自动回退到进程内 JVM。",
+                                "开启后服务端跑在独立子进程：可多实例并发、停止后无需重启 App 即可再起、支持 Java 8 / 17 / 21 / 25。需先安装并授权 Shizuku；不可用时启动会自动回退到进程内 JVM。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

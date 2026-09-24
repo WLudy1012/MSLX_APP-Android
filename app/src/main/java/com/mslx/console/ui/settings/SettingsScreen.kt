@@ -56,6 +56,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.DaemonConfig
 import com.mslx.console.data.UpdateChannel
+import com.mslx.console.ui.theme.GlassSurface
 import com.mslx.console.ui.update.UpdateViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -95,6 +96,8 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        // 页面透明：透出全局毛玻璃背景层
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
@@ -150,7 +153,7 @@ fun SettingsScreen(
 
             // ---- 更新渠道 ----
             SectionTitle("更新渠道")
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
                     ChannelOption(
                         title = "稳定版",
@@ -179,7 +182,7 @@ fun SettingsScreen(
             // 「本机开服」入口已删除（与底部「新建」tab 完全重复）；
             // 本机运行时的配置统一收敛到「本机运行时与开服设置」。
             SectionTitle("服务端")
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column {
                     EntryRow(
                         icon = { Icon(Icons.AutoMirrored.Filled.List, null, tint = MaterialTheme.colorScheme.primary) },
@@ -200,7 +203,7 @@ fun SettingsScreen(
 
             // ---- 通用 ----
             SectionTitle("通用")
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column {
                     EntryRow(
                         icon = { Icon(Icons.Filled.Star, null, tint = MaterialTheme.colorScheme.primary) },
@@ -253,7 +256,7 @@ fun SettingsScreen(
                     )
                 }
             }
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
                     if (settings.daemons.isEmpty()) {
                         Text(

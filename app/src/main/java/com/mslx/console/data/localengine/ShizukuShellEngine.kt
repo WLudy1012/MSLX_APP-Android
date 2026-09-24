@@ -25,7 +25,7 @@ import java.io.OutputStream
  * 相比进程内 JVM（[InProcessJvmEngine]）：
  *  - 支持多实例并发（各自独立子进程）；
  *  - 可正常启停/重启（子进程退出即释放，无需重启 App）；
- *  - 跨 Java 版本（8/17/21 用各自的 `bin/java`）；
+ *  - 跨 Java 版本（8/17/21/25 用各自的 `bin/java`）；
  *  - 官方 bundler 壳可直接 `java -jar`（真 launcher 能 fork 子进程）。
  *
  * 工作目录分两种：
@@ -128,8 +128,15 @@ class ShizukuShellEngine(
 
         // Android linker 不认 JDK 自带的 $ORIGIN/../lib 搜索路径，必须显式给
         // LD_LIBRARY_PATH，否则 exec 会立即失败："libjli.so" not found（rc=1）。
+        // Java 8 的库在 `lib/<arch>[/jli]`（如 lib/aarch64/jli/libjli.so），
+        // 17/21/25 平铺在 `lib[/jli]`；不存在的目录会被 linker 忽略，全部列上。
+        val libDirs = listOf(
+            "lib", "lib/jli",
+            "lib/aarch64", "lib/aarch64/jli",
+            "lib/amd64", "lib/amd64/jli",
+        ).joinToString(":") { "$remoteJre/$it" }
         val env = buildList {
-            add("LD_LIBRARY_PATH=$remoteJre/lib")
+            add("LD_LIBRARY_PATH=$libDirs")
             // 旧版 OpenJDK（如 jre17 的 2021 构建）在 Android 12+ 上会被 Scudo 的堆指针
             // 打标签校验直接 SIGABRT（"Pointer tag ... was truncated"），垫片在 java main
             // 之前关掉本进程打标签；无垫片（未内嵌该 ABI）时退回原样启动。

@@ -8,7 +8,7 @@
   [`app/src/jreRuntime/assets/jre/NOTICE-jre17.txt`](app/src/jreRuntime/assets/jre/NOTICE-jre17.txt)
 
 内容涵盖：上游 MSLX / MSLAPI 与本应用的许可关系（AGPL-3.0 + 第三方身份声明）、
-Android OpenJDK 构建产物（Java 17 内嵌、Java 21 下载，GPL-2.0 with Classpath Exception）、
+Android OpenJDK 构建产物（Java 17 内嵌，Java 8 / 21 / 25 下载，GPL-2.0 with Classpath Exception）、
 以及 AndroidX / Compose / Kotlin / Retrofit / OkHttp / Gson / SignalR / Coil / XZ /
 Commons-Compress / Shizuku 等随包库的许可证。
 

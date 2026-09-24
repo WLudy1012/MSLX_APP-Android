@@ -47,7 +47,10 @@ fun WelcomeScreen(onStart: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    Scaffold { innerPadding ->
+    Scaffold(
+        // 页面透明：透出全局毛玻璃背景层
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -58,9 +61,9 @@ fun WelcomeScreen(onStart: () -> Unit) {
             verticalArrangement = Arrangement.Center,
         ) {
             Image(
-                painter = painterResource(R.drawable.mslx_logo),
+                painter = painterResource(R.drawable.slime_logo),
                 contentDescription = "MSLX",
-                modifier = Modifier.size(150.dp),
+                modifier = Modifier.size(164.dp),
             )
             Spacer(Modifier.height(20.dp))
             Text(

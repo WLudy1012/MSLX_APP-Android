@@ -133,6 +133,8 @@ fun ConsoleScreen(
     }
 
     Scaffold(
+        // 页面透明：透出全局毛玻璃背景层（日志区自绘深色终端卡片）
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {

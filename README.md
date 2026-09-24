@@ -120,15 +120,18 @@ app/src/main/java/com/mslx/console/
   | --- | --- | --- |
   | Java 17 | PojavLauncher `jre17-ec28559`（Android/bionic） | **内嵌在完整版 APK**，可离线安装 |
   | Java 21 | FCL 下载站 `jre21-arm64-20260223`（Android/bionic） | 应用内下载，SHA-256 固定 |
-  | Java 8 | — | **暂无 Android 构建**（上游只有 iOS/macOS 产物），UI 标为不可用 |
+  | Java 25 | FCL 下载站 `jre25-arm64-20260223`（Android/bionic） | 应用内下载，SHA-256 固定 |
+  | Java 8 | ZalithLauncher 2 内置 `runtimes/jre-8`（OpenJDK 8u442，Android/bionic） | 应用内下载（类库 + 平台二进制双归档），SHA-256 固定 |
 
-  下载源按「CNB 镜像 → GitHub Release → 上游直链」依次回退；精简版 APK 不内嵌运行时，
-  首次开服需联网下载约 36MB。
-- **版本匹配守卫**：1.17–1.20.4 用 Java 17，1.20.5+ 用 Java 21；运行时低于核心要求时启动会被
-  直接拦下并给出可执行的提示（而不是刷一堆看不懂的 JVM 报错）。
+  下载源按「CNB 镜像 → GitHub Release → 上游直链」依次回退；Java 8 的类库以 pack200 压缩
+  （`.jar.pack`）分发，安装时由随 APK 的 `libunpack200.so` 在设备上还原为 `.jar`。
+  精简版 APK 不内嵌运行时，首次开服需联网下载约 36MB。
+- **版本匹配守卫**：1.16 及以下用 Java 8，1.17–1.20.4 用 Java 17，1.20.5+ 用 Java 21，26.x+ 用
+  Java 25；运行时低于核心要求时启动会被直接拦下并给出可执行的提示（而不是刷一堆看不懂的 JVM 报错）。
 - **保活**：前台服务 + 常驻通知，退到后台/划掉最近任务仍继续运行（通知栏可停）。
 
-开发者相关：`fetch-jre-assets.ps1` 拉内嵌的 jre17（`-Jre21` 取仅作 Release 附件的 jre21）；
+开发者相关：`fetch-jre-assets.ps1` 拉内嵌的 jre17（`-Jre21` / `-Jre25` / `-Jre8` 分别取仅作
+Release 附件的 jre21、jre25、jre8 镜像归档）；
 `build-shim.ps1` 重编 `LD_PRELOAD` 垫片（关 Scudo 堆打标签，否则旧 OpenJDK 在 Android 12+ 必
 SIGABRT）；两者的细节注释在 `app/src/main/cpp/shim/mslxnotag.c` 与 `LocalJreManager.kt`。
 
@@ -182,6 +185,9 @@ MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器
 - **CNB 云构建（.cnb.yml）**：镜像仓库 https://cnb.cool/WLudy/MSLX_APP-Android 上，main push 自动构建 debug APK；
   `v*` tag 推送时从密钥仓库恢复签名、构建 release APK 并发布 CNB Release（应用首选更新源）。
 - **release.yml**：推送 `v*` 标签时，使用仓库 Secrets 恢复签名密钥，构建签名 release APK 并自动附加到对应 Release。
+- **auto-issue-review.yml**：新 issue 打开时用 AI（`actions/ai-inference` + Copilot CLI）自动打标签并评论。
+  认证走内置 GITHUB_TOKEN + `copilot-requests: write`（2026-07 起官方支持、无需 PAT；GitHub Models 已于
+  2026-07-30 退役）；账号无可用 Copilot 订阅/额度时该步骤静默降级（仅打 warning，不影响 issue 流程）。
 
 ### release.yml 所需 Secrets
 
