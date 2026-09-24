@@ -185,9 +185,11 @@ MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器
 - **CNB 云构建（.cnb.yml）**：镜像仓库 https://cnb.cool/WLudy/MSLX_APP-Android 上，main push 自动构建 debug APK；
   `v*` tag 推送时从密钥仓库恢复签名、构建 release APK 并发布 CNB Release（应用首选更新源）。
 - **release.yml**：推送 `v*` 标签时，使用仓库 Secrets 恢复签名密钥，构建签名 release APK 并自动附加到对应 Release。
-- **auto-issue-review.yml**：新 issue 打开时用 AI（`actions/ai-inference` + Copilot CLI）自动打标签并评论。
-  认证走内置 GITHUB_TOKEN + `copilot-requests: write`（2026-07 起官方支持、无需 PAT；GitHub Models 已于
-  2026-07-30 退役）；账号无可用 Copilot 订阅/额度时该步骤静默降级（仅打 warning，不影响 issue 流程）。
+- **auto-issue-review.yml**：新 issue 打开时用 AI 自动打标签并评论。直接调用 GitHub Copilot CLI
+  （`copilot -p ... -s --no-ask-user`，官方推荐模式，提示词模板在 `Prompts/issue-review-instructions.txt`；
+  此前用的 `actions/ai-inference@v1` 内部仍走已退役的 GitHub Models 端点，2026-07-30 起必然失败）。
+  认证走内置 GITHUB_TOKEN + `copilot-requests: write`（无需 PAT，计费到账号 Copilot 订阅）；
+  账号无可用 Copilot 订阅/额度或 CLI 故障时该步骤静默降级（仅打 warning，不影响 issue 流程）。
 
 ### release.yml 所需 Secrets
 

@@ -2,12 +2,12 @@ name: Auto Issue Review
 
 # 新 issue 打开时用 AI 自动打标签并评论。
 #
-# 认证（2026-07 起）：GitHub Models 已于 2026-07-30 退役，actions/ai-inference 转为
-# Copilot-only —— 运行前需在 runner 上安装 Copilot CLI（npm install -g @github/copilot），
-# 认证走内置 GITHUB_TOKEN + 本文件的 `copilot-requests: write` 权限（无需 PAT，见
-# docs.github.com「Using Copilot CLI in GitHub Actions with GITHUB_TOKEN」）。
-# Copilot 请求计费到账号的 Copilot 订阅；无可用订阅/额度时 AI 步骤会失败，
-# 但被 continue-on-error 吞掉并仅打 warning，不影响 issue 本身。
+# 实现（2026-09 调整）：直接调用 GitHub Copilot CLI（官方推荐模式，见
+# docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli-in-actions）。
+# 此前用的 actions/ai-inference@v1 内部仍走已退役的 GitHub Models 端点
+# （models.github.ai，2026-07-30 退役），任何配置组合都必然失败。
+# 认证：内置 GITHUB_TOKEN + 本文件的 `copilot-requests: write` 权限（无需 PAT），
+# 计费到账号 Copilot 订阅；无订阅/额度或 CLI 故障时步骤静默降级（仅 warning）。
 on:
   issues:
     types: [opened]
@@ -25,7 +25,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Copilot CLI 未预装在 runner 上，而 actions/ai-inference 依赖它。
+      # Copilot CLI 未预装在 runner 上，需自行安装（官方文档要求近期版本）。
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -48,59 +48,61 @@ jobs:
             core.setOutput('body', issue.data.body || '');
             core.setOutput('existing_labels', issue.data.labels.map(l => l.name).join(','));
 
-      # actions/ai-inference 会对 input 做 YAML 解析，且变量替换发生在 prompt 模板
-      # 解析之前：标题含 [ ] 等 YAML 语法字符、正文含换行的 issue 都会解析失败
-      # （表现为 AI 步骤静默降级、无评论无标签）。改为 file_input 传变量：
-      # 值先写入文件并单行化（换行转义为字面 \n），替换进 prompt.yml 的块标量后
-      # 任何字符都是纯文本，始终可解析。
-      - name: Prepare template variables
+      # 把评审指令与 issue 内容拼成提示词文件：变量经 env 传入、由 python 组装，
+      # 不经过任何 YAML/shell 字符串拼接，标题/正文含方括号、换行、引号等都不受影响。
+      - name: Prepare prompt
         env:
           ISSUE_TITLE: ${{ steps.issue.outputs.title }}
           ISSUE_BODY: ${{ steps.issue.outputs.body }}
         run: |
-          cat > "$RUNNER_TEMP/write_vars.py" <<'PY'
+          cat > "$RUNNER_TEMP/build_prompt.py" <<'PY'
           import os
 
-          def oneline(s):
-              s = s.replace("\r\n", "\n").replace("\r", "\n")
-              return s.replace("\n", "\\n")
+          with open("Prompts/issue-review-instructions.txt", encoding="utf-8") as f:
+              instructions = f.read()
 
-          temp = os.environ["RUNNER_TEMP"]
-          with open(os.path.join(temp, "var-title.txt"), "w", encoding="utf-8") as f:
-              f.write(oneline(os.environ.get("ISSUE_TITLE", "")))
-          with open(os.path.join(temp, "var-body.txt"), "w", encoding="utf-8") as f:
-              f.write(oneline(os.environ.get("ISSUE_BODY", "")))
+          title = os.environ.get("ISSUE_TITLE", "")
+          body = os.environ.get("ISSUE_BODY", "")
+          prompt = f"{instructions}\n\n---\n\nTitle: {title}\n\nBody:\n{body}\n"
+
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "ai-prompt.txt"), "w", encoding="utf-8") as f:
+              f.write(prompt)
           PY
-          python3 "$RUNNER_TEMP/write_vars.py"
+          python3 "$RUNNER_TEMP/build_prompt.py"
 
       - name: Run AI review
         id: ai
-        # AI 不可用（无订阅/额度/网络）时不让 issue 流程变红：后续步骤做空值降级
+        # AI 不可用（无订阅/额度/网络/CLI 故障）时不让 issue 流程变红：
+        # 失败仅打 warning，Parse 步骤读不到输出文件时做空值降级。
         continue-on-error: true
-        uses: actions/ai-inference@v1
-        with:
-          model: gpt-4.1
-          # action 默认仅 200 tokens，评论 + JSON 会被截断，显式放宽
-          max-tokens: 1024
-          prompt-file: ./Prompts/issue-review.prompt.yml
-          file_input: |
-            title: ${{ runner.temp }}/var-title.txt
-            body: ${{ runner.temp }}/var-body.txt
         env:
-          # action 内部读 GITHUB_TOKEN，Copilot CLI 读 COPILOT_GITHUB_TOKEN，
-          # 两个都传同一个内置 token（2026-07 起官方支持，无需 PAT）
+          # 官方支持的免 PAT 方案：GITHUB_TOKEN + 本文件的 copilot-requests 权限
           GITHUB_TOKEN: ${{ github.token }}
-          COPILOT_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # 不指定 --model，用 CLI 默认模型（显式传不支持的模型名会直接失败）
+          copilot -p "$(cat "$RUNNER_TEMP/ai-prompt.txt")" -s --no-ask-user \
+            > "$RUNNER_TEMP/ai-response.txt" 2> "$RUNNER_TEMP/ai-stderr.log" || {
+              code=$?
+              echo "::warning::Copilot CLI 退出码 $code，stderr 末尾："
+              tail -c 1500 "$RUNNER_TEMP/ai-stderr.log" || true
+              exit $code
+            }
 
       - name: Parse and apply AI output
         uses: actions/github-script@v7
         env:
-          AI_RESPONSE: ${{ steps.ai.outputs.response }}
+          AI_RESPONSE_FILE: ${{ runner.temp }}/ai-response.txt
           AI_OUTCOME: ${{ steps.ai.outcome }}
           EXISTING_LABELS: ${{ steps.issue.outputs.existing_labels }}
         with:
           script: |
-            const raw = process.env.AI_RESPONSE || '';
+            const fs = require('fs');
+            let raw = '';
+            try {
+              raw = fs.readFileSync(process.env.AI_RESPONSE_FILE, 'utf8');
+            } catch (e) {
+              core.debug(`AI response file not readable: ${e.message}`);
+            }
             if (!raw.trim()) {
               core.warning(`AI 评审未返回内容（step outcome=${process.env.AI_OUTCOME}）。` +
                 '请检查账号 Copilot 订阅/额度，以及 workflow 的 copilot-requests 权限是否生效。');
