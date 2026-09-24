@@ -38,7 +38,4 @@ messages:
     content: |
       Title: {{title}}
       Body: {{body}}
-model: openai/gpt-4o-mini
-modelParameters:
-  max_tokens: 600
-  temperature: 0.3
+model: gpt-4.1

@@ -1,4 +1,13 @@
 name: Auto Issue Review
+
+# 新 issue 打开时用 AI 自动打标签并评论。
+#
+# 认证（2026-07 起）：GitHub Models 已于 2026-07-30 退役，actions/ai-inference 转为
+# Copilot-only —— 运行前需在 runner 上安装 Copilot CLI（npm install -g @github/copilot），
+# 认证走内置 GITHUB_TOKEN + 本文件的 `copilot-requests: write` 权限（无需 PAT，见
+# docs.github.com「Using Copilot CLI in GitHub Actions with GITHUB_TOKEN」）。
+# Copilot 请求计费到账号的 Copilot 订阅；无可用订阅/额度时 AI 步骤会失败，
+# 但被 continue-on-error 吞掉并仅打 warning，不影响 issue 本身。
 on:
   issues:
     types: [opened]
@@ -6,7 +15,8 @@ on:
 permissions:
   contents: read
   issues: write
-  models: read
+  # Copilot CLI 认证（GITHUB_TOKEN，无需 PAT）
+  copilot-requests: write
 
 jobs:
   review:
@@ -14,6 +24,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # Copilot CLI 未预装在 runner 上，而 actions/ai-inference 依赖它。
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
 
       - name: Fetch issue title and body
         id: issue
@@ -31,21 +50,35 @@ jobs:
 
       - name: Run AI review
         id: ai
+        # AI 不可用（无订阅/额度/网络）时不让 issue 流程变红：后续步骤做空值降级
+        continue-on-error: true
         uses: actions/ai-inference@v1
         with:
-          model: openai/gpt-4o-mini
+          model: gpt-4.1
           prompt-file: ./Prompts/issue-review.prompt.yml
           input: |
             title: ${{ steps.issue.outputs.title }}
             body: ${{ steps.issue.outputs.body }}
+        env:
+          # action 内部读 GITHUB_TOKEN，Copilot CLI 读 COPILOT_GITHUB_TOKEN，
+          # 两个都传同一个内置 token（2026-07 起官方支持，无需 PAT）
+          GITHUB_TOKEN: ${{ github.token }}
+          COPILOT_GITHUB_TOKEN: ${{ github.token }}
 
       - name: Parse and apply AI output
         uses: actions/github-script@v7
         env:
           AI_RESPONSE: ${{ steps.ai.outputs.response }}
+          AI_OUTCOME: ${{ steps.ai.outcome }}
+          EXISTING_LABELS: ${{ steps.issue.outputs.existing_labels }}
         with:
           script: |
-            const raw = process.env.AI_RESPONSE;
+            const raw = process.env.AI_RESPONSE || '';
+            if (!raw.trim()) {
+              core.warning(`AI 评审未返回内容（step outcome=${process.env.AI_OUTCOME}）。` +
+                '请检查账号 Copilot 订阅/额度，以及 workflow 的 copilot-requests 权限是否生效。');
+              return;
+            }
             let parsed;
             try {
               const match = raw.match(/\{[\s\S]*\}/);
@@ -62,8 +95,9 @@ jobs:
               'priority/critical', 'priority/high', 'priority/low'
             ];
 
-            const existingLabels = '${{ steps.issue.outputs.existing_labels }}'
-              .split(',').filter(Boolean);
+            // AI 建议与允许清单取交集：不在清单内或已存在的标签不重复应用
+            const existingLabels = (process.env.EXISTING_LABELS || '')
+              .split(',').map(s => s.trim()).filter(Boolean);
 
             const labelsToApply = (parsed.labels || [])
               .filter(l => allowedLabels.includes(l) && !existingLabels.includes(l));
