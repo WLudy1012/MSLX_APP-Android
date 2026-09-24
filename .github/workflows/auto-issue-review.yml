@@ -82,6 +82,6 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `##AI 自动评审\n\n${parsed.comment}`
+                body: `AI 自动评审\n\n${parsed.comment}`
               });
             }
