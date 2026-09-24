@@ -34,10 +34,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.ManagedServer
 import com.mslx.console.data.ServerRef
+import com.mslx.console.data.isStoppableStatus
 import com.mslx.console.ui.StatusBadge
 import com.mslx.console.ui.StatusDot
 import com.mslx.console.ui.statusColor
@@ -70,6 +74,14 @@ fun InstancesScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<ManagedServer?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // 启停/停全部的结果提示：弹一次 Snackbar 后请 VM 清空，避免旋转屏/重组重复弹
+    LaunchedEffect(state.actionMessage) {
+        val message = state.actionMessage ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(message)
+        viewModel.clearActionMessage()
+    }
 
     // 每次回到本页(如新建实例完成后返回)时刷新实例列表
     LifecycleResumeEffect(Unit) {
@@ -80,10 +92,20 @@ fun InstancesScreen(
     Scaffold(
         // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("实例列表", fontWeight = FontWeight.Bold) },
-                actions = {},
+                actions = {
+                    // 一键停止全部：逐个按实例归属下发，不再依赖“主连接”
+                    val hasStoppable = state.servers.any { isStoppableStatus(it.status) }
+                    TextButton(
+                        onClick = viewModel::stopAll,
+                        enabled = hasStoppable && !state.stoppingAll,
+                    ) {
+                        Text(if (state.stoppingAll) "停止中…" else "停止全部")
+                    }
+                },
             )
         },
     ) { innerPadding ->
@@ -167,7 +189,9 @@ fun InstancesScreen(
                             items(state.servers, key = { it.key }) { server ->
                                 InstanceCard(
                                     server = server,
+                                    busy = server.key in state.busyKeys,
                                     onClick = { server.ref?.let(onOpenServer) },
+                                    onToggle = { viewModel.toggle(server, start = !server.running) },
                                     onDelete = { pendingDelete = server },
                                     modifier = Modifier.animateItem(),
                                 )
@@ -235,11 +259,13 @@ private fun EmptyIcon() {
 @Composable
 private fun InstanceCard(
     server: ManagedServer,
+    busy: Boolean,
     onClick: () -> Unit,
+    onToggle: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val statusCode = if (server.running) 2 else 0
+    val statusCode = server.status
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(18.dp),
@@ -275,14 +301,42 @@ private fun InstanceCard(
                 )
                 Spacer(Modifier.height(7.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusBadge(status = statusCode, statusText = if (server.running) "运行中" else "未启动")
+                    StatusBadge(status = statusCode, statusText = null)
                     Spacer(Modifier.width(10.dp))
+                    // 来源徽标：多服务端共存时一眼分辨实例属于哪台（本机/各 Daemon 完全对等）
                     Text(
-                        text = "[${server.sourceLabel}]" + server.detail.ifBlank { "" }.let { if (it.isBlank()) "" else " $it" },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = server.sourceLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                    if (server.detail.isNotBlank()) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = server.detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            // 启停：按实例归属的 ServerRef 下发，进行中的那一行显进度
+            TextButton(onClick = onToggle, enabled = !busy) {
+                if (busy) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text(
+                        text = if (server.running) "停止" else "启动",
+                        color = if (server.running) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
                     )
                 }
             }

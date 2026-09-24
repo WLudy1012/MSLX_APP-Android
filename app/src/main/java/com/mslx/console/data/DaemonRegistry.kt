@@ -24,6 +24,9 @@ data class DaemonStatus(
     val version: String? = null,
     val instanceCount: Int? = null,
     val latencyMs: Long? = null,
+    /** 宿主系统信息（来自 /api/status，供主页 Daemon 卡片展示）。 */
+    val osType: String? = null,
+    val osArchitecture: String? = null,
     /**
      * 是否为「默认 Daemon」——仅用作新建实例的默认落点与主页首屏页码，
      * **不代表任何连接优先级**（各 Daemon 地位完全对等）。
@@ -143,6 +146,8 @@ class DaemonRegistry {
                 version = status?.version,
                 instanceCount = instanceCount,
                 latencyMs = latency,
+                osType = status?.systemInfo?.osType,
+                osArchitecture = status?.systemInfo?.osArchitecture,
                 isDefault = isDefault,
                 checkedAt = checkedAt,
             ))

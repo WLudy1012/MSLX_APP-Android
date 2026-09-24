@@ -39,12 +39,12 @@ class MainActivity : ComponentActivity() {
     /** 通知点击待打开的实例（去主连接：daemonId + instanceId 才能定位）；null 表示无。 */
     private val pendingRef = mutableStateOf<ServerRef?>(null)
 
-    /** 从 Intent 取通知携带的实例定位符。 */
+    /** 从 Intent 取通知携带的实例定位符（本机实例 instanceId = 目录名，因此按 String 读取）。 */
     private fun intentServerRef(intent: Intent?): ServerRef? {
-        val instanceId = intent?.getLongExtra(ServerNotificationHelper.EXTRA_INSTANCE_ID, -1L) ?: -1L
+        val instanceId = intent?.getStringExtra(ServerNotificationHelper.EXTRA_INSTANCE_ID)
         val daemonId = intent?.getStringExtra(ServerNotificationHelper.EXTRA_DAEMON_ID)
-        if (instanceId <= 0 || daemonId.isNullOrBlank()) return null
-        return ServerRef.remote(daemonId, instanceId)
+        if (instanceId.isNullOrBlank() || daemonId.isNullOrBlank()) return null
+        return ServerRef(daemonId, instanceId)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

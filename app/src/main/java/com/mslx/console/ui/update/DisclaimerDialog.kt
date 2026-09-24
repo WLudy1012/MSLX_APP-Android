@@ -23,8 +23,11 @@ import androidx.compose.ui.unit.dp
 import com.mslx.console.data.AppSettings
 import kotlinx.coroutines.delay
 
-/** 免责协议全文（与仓库根目录 DISCLAIMER.txt 保持一致）。 */
-private val DISCLAIMER_TEXT = """
+/**
+ * 免责协议全文（与仓库根目录 DISCLAIMER.txt 保持一致）。
+ * [DisclaimerDialog]（首次开屏强制阅读）与「关于 → 第三方免责声明」共用这一份，避免两处文案漂移。
+ */
+internal val DISCLAIMER_TEXT = """
 一、第三方项目声明
 
 本软件(下称"本应用")是第三方开发者为 MSLX 项目(https://github.com/MSLTeam/MSLX)及其附属项目
@@ -45,12 +48,21 @@ private val DISCLAIMER_TEXT = """
    资源的合法使用权限,并自行承担连接与操作带来的全部风险。
 4. 在用户明确勾选"允许 HTTP"时,本应用会通过明文 HTTP 传输数据(含 API Key),仅建议在
    完全可信的内网环境使用;由此产生的被窃听、篡改等风险由使用者自行承担。
+5. 本机开服会在您自己的手机上下载并运行服务端:需要联网获取服务端核心与 Java 运行时,
+   会占用存储、内存与网络带宽,并可能明显增加发热与耗电;后台保活依赖前台服务与常驻通知,
+   受系统省电策略影响可能被系统回收。
+6. 建在公共目录(/storage/emulated/0/MSLX)的本机实例需要"所有文件访问"权限,本应用仅在该
+   目录下读写服务端文件;授权后您在文件管理器里对这些文件的自行改动同样由您本人负责。
+7. 开启增强模式(Shizuku / ADB)后,本应用会以 shell 权限 exec 真正的 java 子进程。该权限高于
+   普通应用权限,请确认您了解其含义后再开启;未授权时本应用会自动退回普通模式。
 
 三、开源许可
 
 本应用基于 GNU Affero General Public License v3.0 (AGPL-3.0) 开源,
 源码见项目仓库 https://github.com/WLudy1012/MSLX_APP-Android。
 上游 MSLX 项目同样基于 AGPL-3.0 开源,详见其项目仓库 https://github.com/MSLTeam/MSLX。
+本应用随包/下载的第三方组件与 Java 运行时许可,见应用内"关于 → 合规与许可 → 第三方组件与许可"。
+运行 Minecraft 服务端还需遵守 Mojang Studios / Microsoft 的 Minecraft EULA。
 
 四、同意
 

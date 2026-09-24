@@ -70,9 +70,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.ServerRef
+import com.mslx.console.data.localengine.InstanceStorage
+import com.mslx.console.data.localengine.LocalStorage
+import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -95,6 +99,12 @@ fun CreateInstanceScreen(
 
     LaunchedEffect(Unit) {
         viewModel.message.collect { snackbarHostState.showSnackbar(it) }
+    }
+
+    // 从系统「所有文件访问」授权页回来时重读权限，否则开关会停在旧值
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshStorageAccess()
+        onPauseOrDispose { }
     }
 
     // 重按"新建"tab（Dock 在 NavHost 外层）→ 重置表单
@@ -171,6 +181,7 @@ fun CreateInstanceScreen(
                     onTargetChange = viewModel::setTarget,
                     onDaemonChange = viewModel::setDaemon,
                     onSelectLocalRuntime = viewModel::selectLocalRuntime,
+                    onSelectStorage = viewModel::selectInstanceStorage,
                     onModeChange = viewModel::setMode,
                     onNext = viewModel::nextStep,
                     onPrev = viewModel::prevStep,
@@ -184,6 +195,23 @@ fun CreateInstanceScreen(
                 )
             }
         }
+    }
+
+    if (state.showPublicStorageRationale) {
+        PublicStorageRationaleDialog(
+            onOpenSettings = {
+                viewModel.openPublicStorageSettings()
+                // 个别 ROM 没有按包跳转的入口：失败就退回总页面
+                val opened = runCatching {
+                    context.startActivity(LocalStorage.publicStorageSettingsIntent(context))
+                }.isSuccess || runCatching {
+                    context.startActivity(LocalStorage.publicStorageSettingsFallbackIntent())
+                }.isSuccess
+                if (!opened) scope.launch { snackbarHostState.showSnackbar("未能打开系统授权页，请手动到设置里查找") }
+            },
+            onUsePrivate = viewModel::dismissWithPrivateStorage,
+            onDismiss = viewModel::dismissWithPrivateStorage,
+        )
     }
 
     if (state.coreSelectorVisible) {
@@ -229,6 +257,8 @@ private fun FormContent(
     /** 切换目标 Daemon（仅远程目标）。 */
     onDaemonChange: (String) -> Unit,
     onSelectLocalRuntime: (String) -> Unit,
+    /** 本机实例存放位置（公共/私有）。 */
+    onSelectStorage: (InstanceStorage) -> Unit,
     onModeChange: (Int) -> Unit,
     onNext: () -> Unit,
     onPrev: () -> Unit,
@@ -316,7 +346,7 @@ private fun FormContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 when (paneStep?.key) {
-                    "basic" -> BasicStep(state, onUpdate)
+                    "basic" -> BasicStep(state, onUpdate, onSelectStorage)
                     "core" -> CoreStep(state, onUpdate, onOpenCoreSelector, onClearCore, onRemoveUpload, onPickJar)
                     "package" -> PackageStep(state, onUpdate, onOpenCoreSelector, onClearCore, onPickPackage)
                     "java" -> JavaStep(state, onUpdate, onSelectLocalRuntime)
@@ -367,13 +397,16 @@ private fun StepIndicator(steps: List<WizardStep>, current: Int) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun BasicStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanceUiState) -> CreateInstanceUiState) -> Unit) {
+private fun BasicStep(
+    state: CreateInstanceUiState,
+    onUpdate: ((CreateInstanceUiState) -> CreateInstanceUiState) -> Unit,
+    onSelectStorage: (InstanceStorage) -> Unit,
+) {
     SectionCard("基本信息") {
         OutlinedTextField(value = state.name, onValueChange = { v -> onUpdate { it.copy(name = v) } }, label = { Text("实例名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         if (state.target == "local") {
-            // 本机实例目录由名称自动派生（私有数据目录 servers/<名称>），无需 Daemon 绝对路径
-            Text("本机实例将创建在应用私有目录的 servers/ 下，目录名由实例名称自动生成，无需填写路径。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LocalStoragePicker(state, onSelectStorage)
         } else {
             OutlinedTextField(value = state.path, onValueChange = { v -> onUpdate { it.copy(path = v) } }, label = { Text("实例路径（选填，Daemon 上的绝对路径）") }, placeholder = { Text("例如: /home/user/下载/") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(6.dp))
@@ -387,6 +420,74 @@ private fun BasicStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanceUi
             }
         }
     }
+}
+
+/**
+ * 本机实例存放位置：默认公共目录（能在文件管理器里直接看到服务端文件），
+ * 未拿到「所有文件访问」时点公共会先弹用途说明；系统不支持（Android 11 以下）则直接置灰。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LocalStoragePicker(
+    state: CreateInstanceUiState,
+    onSelectStorage: (InstanceStorage) -> Unit,
+) {
+    Text("实例目录", style = MaterialTheme.typography.labelMedium)
+    Spacer(Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        InstanceStorage.entries.forEach { storage ->
+            val blocked = storage == InstanceStorage.PUBLIC && !state.publicStorageSupported
+            FilterChip(
+                selected = state.localInstanceStorage == storage,
+                enabled = !blocked,
+                onClick = { onSelectStorage(storage) },
+                label = { Text(if (storage == InstanceStorage.PUBLIC) "公共目录（推荐）" else "应用私有目录") },
+            )
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+    val preview = when {
+        state.localInstanceStorage == InstanceStorage.PUBLIC && state.publicStorageGranted ->
+            "服务端文件将落在 ${LocalStorage.publicRoot().path}${File.separator}servers${File.separator}${LocalStorage.sanitizeName(state.name)}，" +
+                "可在文件管理器里直接放核心、备份存档；增强模式下启动不再复制文件，更快。"
+
+        state.localInstanceStorage == InstanceStorage.PUBLIC ->
+            "需授予「所有文件访问」；未授权时会自动改建到应用私有目录，不影响开服。"
+
+        !state.publicStorageSupported ->
+            "当前系统（Android 11 以下）不支持应用访问共享存储根目录，只能用私有目录。"
+
+        else ->
+            "服务端文件在应用私有目录（filesDir/mslx/servers）下，随应用卸载消失，无需任何权限。"
+    }
+    Text(preview, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (state.localInstanceStorage == InstanceStorage.PUBLIC && !state.publicStorageGranted && state.publicStorageSupported) {
+        Spacer(Modifier.height(4.dp))
+        TextButton(onClick = { onSelectStorage(InstanceStorage.PUBLIC) }) { Text("去授权「所有文件访问」") }
+    }
+}
+
+/** 选公共目录但还没授权：先说清用途再去系统页，不给“静默拿权限”。 */
+@Composable
+private fun PublicStorageRationaleDialog(
+    onOpenSettings: () -> Unit,
+    onUsePrivate: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("为什么需要「所有文件访问」") },
+        text = {
+            Text(
+                "MSLX 只会把服务端文件读写在 /storage/emulated/0/MSLX 下，目的是：\n" +
+                    "• 你能用系统文件管理器直接放核心、装插件、备份存档；\n" +
+                    "• 增强模式（Shizuku）下直接在公共目录跑，不再复制到系统临时目录，启动明显更快。\n\n" +
+                    "该权限不会用于读取其它私人文件；不授权也可直接改用应用私有目录开服。",
+            )
+        },
+        confirmButton = { TextButton(onClick = onOpenSettings) { Text("去系统授权") } },
+        dismissButton = { TextButton(onClick = onUsePrivate) { Text("改用私有目录") } },
+    )
 }
 
 
@@ -410,7 +511,7 @@ private fun CoreStep(
             Spacer(Modifier.height(8.dp))
         }
         if (state.target == "local") {
-            Text("本机开服仅支持 MSLAPI 在线核心，下载后经 SHA-256 校验落地到私有目录。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("本机开服仅支持 MSLAPI 在线核心，下载后经 SHA-256 校验落地到上一步选定的实例目录。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
         }
         if (state.mode == 3) {
@@ -509,7 +610,7 @@ private fun JavaStep(
                     }
                 }
                 Spacer(Modifier.height(6.dp))
-                Text("未安装的运行时请到「设置 → 本地开服设置」安装；启动时会自动校验。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("未安装的运行时请到「设置 → 本机运行时与开服设置」安装；启动时会自动校验。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         return
@@ -620,7 +721,14 @@ private fun ConfirmStep(state: CreateInstanceUiState) {
         SummaryRow("创建目标", if (isLocal) "本机" else "远程 Daemon")
         SummaryRow("实例名称", state.name)
         if (isLocal) {
-            SummaryRow("实例目录", "本机私有目录 (mslx/servers)")
+            // 真实落点：选了公共但没拿到权限时，创建会自动改写到私有目录，这里提前说清
+            val wantPublic = state.localInstanceStorage == InstanceStorage.PUBLIC
+            val path = LocalStorage.previewPath(state.localInstanceStorage, state.name)
+            SummaryRow(
+                "实例目录",
+                if (wantPublic && !state.publicStorageGranted) "$path（未授权，将改建到 ${LocalStorage.previewPath(InstanceStorage.PRIVATE, state.name)}）"
+                else "$path（${state.localInstanceStorage.label}）",
+            )
         } else {
             SummaryRow("实例路径", state.path.ifBlank { "默认路径（Daemon 数据目录/Server）" })
         }

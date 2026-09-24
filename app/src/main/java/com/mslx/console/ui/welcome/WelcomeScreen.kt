@@ -32,11 +32,13 @@ import com.mslx.console.MSLXApplication
 import com.mslx.console.R
 import kotlinx.coroutines.launch
 
+/** 首次启动欢迎页的能力清单（与 README、设置页口径一致：远程管理 + 本机开服）。 */
 private val features = listOf(
-    "连接 MSLX 守护程序，随时管理你的服务器",
-    "一键启动 / 停止 / 重启 / 备份实例",
-    "实时控制台日志，手机也能发命令",
-    "多台 Daemon 自由切换，主题随心换",
+    "连接你自己的 MSLX 守护程序（Daemon），随时管理服务器实例",
+    "多台 Daemon 平级共存，所有入口按实例寻址，不再区分主连接",
+    "实时控制台：日志保留原彩 ANSI，手机也能发命令",
+    "不想连电脑？也可以在手机本机开服（公共或应用私有目录）",
+    "应用内检查更新：稳定版 / Beta / Actions 调试构建三个渠道",
 )
 
 /** 首次启动欢迎页。 */
@@ -69,7 +71,7 @@ fun WelcomeScreen(onStart: () -> Unit) {
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                text = "在手机上远程管理你的 Minecraft 服务器",
+                text = "在手机上远程管理 Minecraft 服务器，或直接在本机开服",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -110,6 +112,16 @@ fun WelcomeScreen(onStart: () -> Unit) {
             ) {
                 Text("开始使用", style = MaterialTheme.typography.titleMedium)
             }
+            Spacer(Modifier.height(14.dp))
+            // 第三方身份与许可指引（与开屏免责声明、关于页同一口径）
+            Text(
+                text = "本应用是独立第三方项目，与 MSLTeam 无隶属关系；" +
+                    "使用前请阅读首次弹出的「第三方免责声明」，" +
+                    "组件许可见「设置 → 关于 → 合规与许可」。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }

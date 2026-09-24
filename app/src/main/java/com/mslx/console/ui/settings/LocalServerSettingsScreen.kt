@@ -39,8 +39,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.localengine.ShizukuStatus
 
 /**
- * 本机开服的默认性能设置：内存、额外 JVM 参数、后台保活（前台服务）、GC 选择。
- * 这些值是本机开服页的默认值，页面内仍可临时覆盖。
+ * 本机开服的入口设置页（设置列表里叫「本机运行时与开服设置」）：
+ * Java 运行时安装、内存、额外 JVM 参数、后台保活（前台服务）、GC 选择、增强模式。
+ * 这些值是全局默认，实例自己的设置页默认跟随，也可以单独覆盖。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,7 +54,7 @@ fun LocalServerSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("本地开服设置") },
+                title = { Text("本机运行时与开服设置") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")

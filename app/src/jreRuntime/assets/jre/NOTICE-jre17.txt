@@ -1,0 +1,38 @@
+内嵌 Java 运行时（JRE 17）来源与许可
+=====================================
+
+本目录下的归档会在构建时打进「完整版」APK（传 -PwithoutJre=true 的精简版不含），
+由 LocalJreManager 按 SHA-256 校验后解压到 filesDir/mslx/runtime/jre17/ 使用。
+
+来源构建
+--------
+项目：PojavLauncherTeam/android-openjdk-build-multiarch
+    https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch
+发布标签：jre17-ec28559
+产物与校验值（与本仓库 fetch-jre-assets.ps1 一致）：
+    jre17-arm64-20210825-release.tar.xz
+        SHA-256 c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
+    jre17-x86_64-20210825-release.tar.xz
+        SHA-256 ebbdf75ab864a83671a108032c30e67174f79cc19596cfc1d7bfb71be26b6e71
+
+许可
+----
+这些归档是 OpenJDK 面向 Android（bionic libc）的交叉编译产物，
+遵循 OpenJDK 的许可证：GPL-2.0-only with Classpath-exception-2.0
+详见 https://openjdk.org/legal/gplv2+ce.html
+
+本应用不修改归档内容，仅在校验通过后解压使用；Classpath Exception 允许我们把
+该运行时随独立程序一起分发。构建脚本自身的许可以上游仓库声明为准。
+
+另：Java 21（jre21-arm64-20260223-release.tar.xz）**不在这里**，也**不进 git**，
+只作为 GitHub Release 附件与 CNB 镜像分发，应用内按「CNB → GitHub → 上游直链」顺序下载，
+校验值写在 LocalJreManager 中；来源同为 OpenJDK 的 Android 构建（许可同上）。
+
+如何重新获取
+------------
+仓库根目录执行：
+    .\fetch-jre-assets.ps1               # 拉 arm64（默认）
+    .\fetch-jre-assets.ps1 -IncludeX86_64
+    .\fetch-jre-assets.ps1 -Jre21        # 只取 jre21 到 build\（发布附件用）
+
+完整的第三方组件与许可清单见 assets/legal/THIRD_PARTY_NOTICES.md（应用内「关于」可查看）。

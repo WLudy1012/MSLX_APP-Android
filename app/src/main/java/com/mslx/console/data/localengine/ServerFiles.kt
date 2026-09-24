@@ -23,6 +23,14 @@ data class LocalInstanceMeta(
     val jvmArgs: String = "",
     val useSerialGc: Boolean = true,
     val keepAlive: Boolean = true,
+    /**
+     * 是否跟随「设置 → 本机运行时与开服设置」的全局默认（内存/JVM 参数/GC/保活）。
+     * true 时启动以全局值为准（本文件里的同名字段仅作展示镜像）；
+     * false 时完全用本实例的值。Java 运行时不受此开关影响（永远按实例自定）。
+     */
+    val inheritGlobal: Boolean = true,
+    /** 存放位置：`private` / `public`（旧 instance.json 无此字段 → 私有）。 */
+    val storage: String = InstanceStorage.PRIVATE.key,
     val serverPort: Int = 25565,
     val motd: String = "",
     val maxPlayers: Int = 20,
@@ -119,10 +127,11 @@ object ServerFiles {
             }
         }
 
-        // 5. 实例元数据
+        // 5. 实例元数据（存放位置由目录所在根反推，避免调用方传错）
         val finalMeta = meta.copy(
             directory = dir.name,
             serverJar = SERVER_JAR_NAME,
+            storage = LocalStorage.storageOf(dir).key,
             createdAt = meta.createdAt.ifBlank { now },
             updatedAt = now,
         )

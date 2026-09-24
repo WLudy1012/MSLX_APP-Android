@@ -14,6 +14,20 @@ sealed interface ServerSource {
 }
 
 /**
+ * 实例是否「运行中」的统一判定。
+ *
+ * 状态码约定（与 [com.mslx.console.ui.statusColor] 一致）：
+ * 0 未启动 / 1 启动中 / 2 运行中 / 3 停止中 / 4 重启中。
+ * 以前 ServerCatalog 按 1 判、控制台按 2 判，两处口径不一致；此处收敛为唯一实现。
+ * statusText 只做整串相等比较——「未运行」包含子串「运行」，用 contains 会误判。
+ */
+fun isRunningStatus(status: Int, statusText: String? = null): Boolean =
+    status == 2 || statusText?.trim() == "运行中"
+
+/** 是否需要停止：运行中与启/停/重启过渡态都算（供「一键停止全部」筛选目标）。 */
+fun isStoppableStatus(status: Int): Boolean = status in 1..4
+
+/**
  * 统一的「服务端」条目：把**本机开服的实例**与**各 Daemon 上的实例**归一成同一模型，
  * 供总览页/实例页统一展示与操作（本机实例纳入通用服务端管理体系）。
  */
@@ -23,6 +37,10 @@ data class ManagedServer(
     val source: ServerSource,
     val detail: String,
     val running: Boolean,
+    /** 状态码：0 未启动 / 1 启动中 / 2 运行中 / 3 停止中 / 4 重启中（本机实例只有 0/2）。 */
+    val status: Int = if (running) 2 else 0,
+    /** 在线玩家数（仅远程实例由 Daemon 提供，本机实例恒为 0）。 */
+    val onlinePlayers: Int = 0,
     val localDirName: String? = null,
     val remoteId: Long? = null,
 ) {
@@ -58,14 +76,15 @@ class ServerCatalog(
     fun localServers(): List<ManagedServer> {
         val context = contextProvider()
         val runtimeRunning = LocalServerRuntime.running.value
-        val activeName = LocalServerRuntime.currentServerName
+        val activeDir = LocalServerRuntime.currentDirName
         return LocalInstanceStore.list(context).map { summary ->
             ManagedServer(
                 key = ServerRef.local(summary.dirName).catalogKey,
                 name = summary.name,
                 source = ServerSource.Local,
                 detail = summary.subtitle,
-                running = runtimeRunning && summary.name == activeName,
+                // 按**目录名**比对而非展示名：两个实例可以同名，而目录名全局唯一
+                running = runtimeRunning && summary.dirName == activeDir,
                 localDirName = summary.dirName,
             )
         }
@@ -83,7 +102,9 @@ class ServerCatalog(
                     instance.core?.takeIf { it.isNotBlank() },
                     instance.statusText?.takeIf { it.isNotBlank() },
                 ).joinToString(" · "),
-                running = instance.status == 1 || instance.statusText?.contains("运行") == true,
+                running = isRunningStatus(instance.status, instance.statusText),
+                status = instance.status,
+                onlinePlayers = instance.extra?.onlinePlayers ?: 0,
                 remoteId = instance.id,
             )
         }

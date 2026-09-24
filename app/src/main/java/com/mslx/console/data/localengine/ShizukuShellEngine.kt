@@ -19,7 +19,7 @@ import java.io.InputStream
 import java.io.OutputStream
 
 /**
- * Shizuku/ADB exec 引擎（增强）：把 JRE 与实例 stage 到 `/data/local/tmp/mslx` 后，
+ * Shizuku/ADB exec 引擎（增强）：把 JRE stage 到 `/data/local/tmp/mslx` 后，
  * 经 [ShizukuController] 在 shell 权限下 exec 真正的 `bin/java` 子进程。
  *
  * 相比进程内 JVM（[InProcessJvmEngine]）：
@@ -28,7 +28,12 @@ import java.io.OutputStream
  *  - 跨 Java 版本（8/17/21 用各自的 `bin/java`）；
  *  - 官方 bundler 壳可直接 `java -jar`（真 launcher 能 fork 子进程）。
  *
- * 代价：首次 stage JRE 较慢；停止时把 world/logs/配置回同步到私有目录（权威存储）。
+ * 工作目录分两种：
+ *  - **私有目录实例**：权威副本在 `filesDir/mslx/servers/<dir>`，shell 读不到，所以启动前
+ *    [ShizukuController.pushInstance] 全量推一次、退出后 [ShizukuController.syncInstanceBack] 回同步；
+ *  - **公共目录实例**：目录本身 shell 可读写，**直接以公共路径为 cwd exec**，省掉两遍全量复制
+ *    （大存档启动时间从数十秒降到秒级）；仅 tmp/user.home 等临时项落在 `/data/local/tmp` 的
+ *    暂存区。探测到 shell 写不了该路径（如部分 ROM 的 FUSE 限制）时自动退回上一种模式。
  */
 class ShizukuShellEngine(
     private val context: Context,
@@ -64,6 +69,10 @@ class ShizukuShellEngine(
     @Volatile
     private var stdin: OutputStream? = null
 
+    /** 本次启动是否把实例 stage 到了 /data/local/tmp（公共目录直跑时为 false，退出后不回同步）。 */
+    @Volatile
+    private var staged = false
+
     /** 启动服务端（挂起：先 stage 文件再 exec；调用方需在 IO 线程）。返回 false 时 [logs] 里已有失败原因。 */
     override suspend fun start(): Boolean {
         if (_running.value) return true
@@ -87,13 +96,33 @@ class ShizukuShellEngine(
         }
         val javaBin = "$remoteJre/$javaRel"
 
-        emit("同步实例文件到运行目录…")
-        val remoteDir = ShizukuController.pushInstance(localInstanceDir, dirName).getOrElse {
-            emit("实例 staging 失败：${it.message}")
-            return false
+        // 工作目录：公共目录且 shell 可写 → 直跑；否则（私有目录/写不了）→ stage 到 /data/local/tmp
+        val publicDir = LocalStorage.storageOf(localInstanceDir) == InstanceStorage.PUBLIC
+        val workDir: String
+        val scratchDir: String
+        if (publicDir) {
+            val directPath = localInstanceDir.absolutePath
+            if (ShizukuController.canWriteRemotePath(directPath)) {
+                workDir = directPath
+                scratchDir = ShizukuController.ensureScratch(dirName).getOrElse {
+                    emit("暂存目录准备失败：${it.message}")
+                    return false
+                }
+                staged = false
+                emit("公共目录直跑：不复制实例文件（临时项→$scratchDir）")
+            } else {
+                emit("shell 写不了公共目录，退回传统模式（复制到 /data/local/tmp 运行，结束后回同步）")
+                workDir = stageInstanceOrFail() ?: return false
+                scratchDir = workDir
+                staged = true
+            }
+        } else {
+            workDir = stageInstanceOrFail() ?: return false
+            scratchDir = workDir
+            staged = true
         }
 
-        val opts = buildOptions(remoteDir)
+        val opts = buildOptions(workDir, scratchDir)
         val cmd = arrayOf(javaBin) + opts + arrayOf("-jar", serverJarName, "nogui")
         emit("启动：${cmd.joinToString(" ")}")
 
@@ -110,7 +139,7 @@ class ShizukuShellEngine(
                 emit("已启用堆打标签垫片（兼容旧版 JRE）")
             }
         }
-        val p = runCatching { ShizukuController.newProcess(cmd, env.toTypedArray(), remoteDir) }.getOrElse {
+        val p = runCatching { ShizukuController.newProcess(cmd, env.toTypedArray(), workDir) }.getOrElse {
             emit("exec 失败：${it.message}")
             return false
         }
@@ -125,13 +154,27 @@ class ShizukuShellEngine(
             exitCode = code
             _running.value = false
             emit(if (code == 0) "服务端已退出" else "服务端退出（rc=$code）")
-            val synced = runCatching { ShizukuController.syncInstanceBack(dirName, localInstanceDir) }
-                .getOrElse { false }
-            emit(if (synced) "已回同步 world/logs/配置到应用目录" else "回同步失败，本次世界改动可能未保存")
-            AppLogger.i(TAG, "exec 子进程结束 rc=$code，回同步=$synced")
+            if (staged) {
+                val synced = runCatching { ShizukuController.syncInstanceBack(dirName, localInstanceDir) }
+                    .getOrElse { false }
+                emit(if (synced) "已回同步 world/logs/配置到应用目录" else "回同步失败，本次世界改动可能未保存")
+                AppLogger.i(TAG, "exec 子进程结束 rc=$code，回同步=$synced")
+            } else {
+                emit("世界/日志已直接写在公共目录，无需回同步")
+                AppLogger.i(TAG, "exec 子进程结束 rc=$code（公共目录直跑）")
+            }
             onExit?.invoke(code)
         }
         return true
+    }
+
+    /** 把实例全量 stage 到 `/data/local/tmp/mslx/servers/<dir>`，返回远端目录（失败返回 null，原因已进日志）。 */
+    private suspend fun stageInstanceOrFail(): String? {
+        emit("同步实例文件到运行目录…")
+        return ShizukuController.pushInstance(localInstanceDir, dirName).getOrElse {
+            emit("实例 staging 失败：${it.message}")
+            null
+        }
     }
 
     override fun sendCommand(command: String) {
@@ -142,7 +185,7 @@ class ShizukuShellEngine(
         }.onFailure { AppLogger.w(TAG, "发送控制台命令失败: $command", it) }
     }
 
-    /** 优雅停止：先发 stop，轮询等待 8s；未退出则强杀子进程（随后仍会回同步）。 */
+    /** 优雅停止：先发 stop，轮询等待 8s；未退出则强杀子进程（暂存模式仍会回同步）。 */
     override fun stop() {
         val p = process ?: return
         if (!_running.value) return
@@ -163,13 +206,16 @@ class ShizukuShellEngine(
     }
 
     /** exec 模式跑的是真 launcher，java.home/classpath/library.path 由其自动设置，这里只给业务参数。 */
-    private fun buildOptions(remoteDir: String): List<String> = buildList {
+    private fun buildOptions(workDir: String, scratchDir: String): List<String> = buildList {
         add("-Xms${minMemM}M")
         add("-Xmx${maxMemM}M")
         if (useSerialGc) add("-XX:+UseSerialGC")
         add("-Dfile.encoding=UTF-8")
-        add("-Djava.io.tmpdir=$remoteDir/tmp")
-        add("-Duser.home=$remoteDir")
+        // 临时目录/用户目录始终落在 shell 可写的暂存区：公共目录走 FUSE，部分设备对
+        // 文件锁与原子重命名支持不全（存档保存、native 解压都会踩到）。
+        add("-Djava.io.tmpdir=$scratchDir/tmp")
+        add("-Duser.home=$scratchDir/home")
+        add("-Djava.library.path=$scratchDir/natives")
         add("-Djava.awt.headless=true")
         add("-Dterminal.jline=false")
         add("-Dterminal.ansi=true")

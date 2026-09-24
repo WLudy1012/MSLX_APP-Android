@@ -14,6 +14,8 @@ import androidx.core.content.ContextCompat
 import com.mslx.console.MainActivity
 import com.mslx.console.R
 import com.mslx.console.data.AppLogger
+import com.mslx.console.data.ServerRef
+import com.mslx.console.ui.ServerNotificationHelper
 
 /**
  * 本机开服的前台服务：只负责「保活 + 常驻通知 + 通知栏停止」。
@@ -86,11 +88,17 @@ class LocalServerService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        val runningDir = LocalServerRuntime.currentDirName
         val openApp = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                // 带上当前运行实例的定位符：点按常驻通知直达该实例控制台（本机实例 daemonId=local）
+                if (runningDir.isNotBlank()) {
+                    putExtra(ServerNotificationHelper.EXTRA_DAEMON_ID, ServerRef.LOCAL_DAEMON_ID)
+                    putExtra(ServerNotificationHelper.EXTRA_INSTANCE_ID, runningDir)
+                }
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

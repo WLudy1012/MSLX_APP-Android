@@ -46,6 +46,7 @@ import com.mslx.console.ui.servers.ServersOverviewScreen
 import com.mslx.console.ui.settings.AppearanceScreen
 import com.mslx.console.ui.settings.AboutScreen
 import com.mslx.console.ui.settings.LogViewerScreen
+import com.mslx.console.ui.settings.LegalDocumentScreen
 import com.mslx.console.ui.splash.SplashScreen
 import com.mslx.console.ui.user.UserCenterScreen
 import com.mslx.console.ui.welcome.WelcomeScreen
@@ -72,6 +73,8 @@ object Routes {
     const val LOGS = "logs"
     const val LOCAL_SERVER_SETTINGS = "localServerSettings"
     const val SERVERS = "servers"
+    /** 合规文档（第三方许可 / 免责声明），docKey 取 [com.mslx.console.ui.settings.LegalDoc.key]。 */
+    const val LEGAL = "legal/{docKey}"
 
     fun console(ref: ServerRef): String = ref.routePath("console")
     fun instanceSettings(ref: ServerRef): String = ref.routePath("instanceSettings")
@@ -85,6 +88,8 @@ object Routes {
 
     fun connect(auto: Boolean, daemonId: String? = null): String =
         "connect?auto=$auto&daemonId=${daemonId.orEmpty()}"
+
+    fun legal(docKey: String): String = "legal/$docKey"
 }
 
 /** 二级页公共路径参数（instanceId 为 String：远程是数值 id，本机是目录名）。 */
@@ -179,10 +184,14 @@ fun AppNavHost(
             composable(Routes.HOME) {
                 HomeScreen(
                     onOpenInstances = { navigateTopLevel(Routes.INSTANCES) },
-                    onOpenNewInstance = { navigateTopLevel(Routes.NEW_INSTANCE) },
-                    onOpenSettings = { navigateTopLevel(Routes.SETTINGS) },
                     onOpenConnect = {
                         navController.navigate(Routes.connect(false)) { launchSingleTop = true }
+                    },
+                    onEditDaemon = { daemonId ->
+                        navController.navigate(Routes.connect(false, daemonId)) { launchSingleTop = true }
+                    },
+                    onOpenServer = { ref ->
+                        navController.navigate(Routes.console(ref)) { launchSingleTop = true }
                     },
                 )
             }
@@ -300,7 +309,23 @@ fun AppNavHost(
             }
 
             composable(Routes.ABOUT) {
-                AboutScreen(onBack = { navController.popBackStack() })
+                AboutScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenLegal = { key ->
+                        navController.navigate(Routes.legal(key)) { launchSingleTop = true }
+                    },
+                )
+            }
+
+            // 合规文档：第三方组件与许可 / 第三方免责声明（文案与首次开屏同源）
+            composable(
+                route = Routes.LEGAL,
+                arguments = listOf(navArgument("docKey") { type = NavType.StringType }),
+            ) { entry ->
+                LegalDocumentScreen(
+                    docKey = entry.arguments?.getString("docKey").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                )
             }
 
             composable(Routes.LOGS) {
@@ -349,7 +374,7 @@ fun AppNavHost(
                 )
             }
 
-            // 实例设置：本机走私有目录直编页，远程走 Daemon API 页
+            // 实例设置：本机走实例目录（公共/私有）直编页，远程走 Daemon API 页
             composable(
                 route = Routes.INSTANCE_SETTINGS,
                 arguments = REF_ARGUMENTS,
@@ -383,7 +408,13 @@ fun AppNavHost(
             ) { backStackEntry ->
                 val ref = backStackEntry.serverRef()
                 if (ref.isLocal) {
-                    LocalInstancePendingScreen(onBack = { navController.popBackStack() })
+                    LocalInstancePendingScreen(
+                        dirName = ref.instanceId,
+                        onOpenSettings = {
+                            navController.navigate(Routes.instanceSettings(ref)) { launchSingleTop = true }
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
                 } else {
                     FileManagerScreen(
                         ref = ref,
@@ -398,7 +429,13 @@ fun AppNavHost(
             ) { backStackEntry ->
                 val ref = backStackEntry.serverRef()
                 if (ref.isLocal) {
-                    LocalInstancePendingScreen(onBack = { navController.popBackStack() })
+                    LocalInstancePendingScreen(
+                        dirName = ref.instanceId,
+                        onOpenSettings = {
+                            navController.navigate(Routes.instanceSettings(ref)) { launchSingleTop = true }
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
                 } else {
                     PluginsModsScreen(
                         ref = ref,
@@ -413,7 +450,13 @@ fun AppNavHost(
             ) { backStackEntry ->
                 val ref = backStackEntry.serverRef()
                 if (ref.isLocal) {
-                    LocalInstancePendingScreen(onBack = { navController.popBackStack() })
+                    LocalInstancePendingScreen(
+                        dirName = ref.instanceId,
+                        onOpenSettings = {
+                            navController.navigate(Routes.instanceSettings(ref)) { launchSingleTop = true }
+                        },
+                        onBack = { navController.popBackStack() },
+                    )
                 } else {
                     ServerPropertiesScreen(
                         ref = ref,

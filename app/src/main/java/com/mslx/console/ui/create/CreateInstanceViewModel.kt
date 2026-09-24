@@ -11,14 +11,17 @@ import com.mslx.console.data.AppSettings
 import com.mslx.console.data.DaemonOption
 import com.mslx.console.data.InstanceRepository
 import com.mslx.console.data.ensureRepository
+import com.mslx.console.data.localengine.InstanceStorage
 import com.mslx.console.data.localengine.LocalCoreInstaller
 import com.mslx.console.data.localengine.LocalInstanceMeta
+import com.mslx.console.data.localengine.LocalInstanceStore
 import com.mslx.console.data.localengine.LocalJreManager
 import com.mslx.console.data.localengine.LocalStorage
 import com.mslx.console.data.model.CreateServerRequest
 import com.mslx.console.data.model.LocalJava
 import com.mslx.console.data.model.ServerCoreDownloadInfo
 import com.mslx.console.data.remote.CreationProgressClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +29,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 已同意 EULA 的 eula.txt 内容（与守护进程 AgreeEULA 写入格式一致）。 */
 private const val EULA_AGREED_CONTENT =
@@ -153,6 +157,14 @@ data class CreateInstanceUiState(
     val localRuntimes: List<LocalRuntimeChoice> = emptyList(),
     val localKeepAlive: Boolean = true,
     val localUseSerialGc: Boolean = true,
+    /** 实例存放位置（默认公共目录，便于用户在文件管理器里直接拿核心/备份存档）。 */
+    val localInstanceStorage: InstanceStorage = InstanceStorage.PUBLIC,
+    /** 本机系统能否用公共目录（仅 Android 11+）。 */
+    val publicStorageSupported: Boolean = true,
+    /** 已授予「所有文件访问」。 */
+    val publicStorageGranted: Boolean = false,
+    /** 选公共目录但尚未授权 → 需先弹一个说人话的用途说明，再由 UI 跳系统授权页。 */
+    val showPublicStorageRationale: Boolean = false,
     /** 本机创建成功后落地的实例目录名（跳统一本机控制台用）。 */
     val createdDirName: String = "",
     // 核心选择器
@@ -304,8 +316,58 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                 error = null,
             )
         }
-        if (target == "local") loadLocalRuntimes()
+        if (target == "local") {
+            loadLocalRuntimes()
+            refreshStorageAccess()
+        }
     }
+
+    /**
+     * 刷新公共目录可用性（系统版本 + 「所有文件访问」授权）。
+     * 从系统授权页回到前台时也要调，否则开关状态会停在旧值。
+     */
+    fun refreshStorageAccess() {
+        val supported = LocalStorage.publicStorageSupported()
+        val granted = LocalStorage.publicStorageGranted()
+        _state.update { s ->
+            val storage = if (!supported) InstanceStorage.PRIVATE else s.localInstanceStorage
+            s.copy(
+                publicStorageSupported = supported,
+                publicStorageGranted = granted,
+                localInstanceStorage = storage,
+                showPublicStorageRationale = s.showPublicStorageRationale && !granted && supported,
+            )
+        }
+    }
+
+    /** 切换实例存放位置：选公共且未授权时弹前置说明（由 UI 负责跳系统授权页）。 */
+    fun selectInstanceStorage(storage: InstanceStorage) {
+        if (_state.value.localInstanceStorage == storage && storage == InstanceStorage.PRIVATE) return
+        if (storage == InstanceStorage.PUBLIC && !_state.value.publicStorageGranted) {
+            _state.update { it.copy(localInstanceStorage = InstanceStorage.PUBLIC, showPublicStorageRationale = true) }
+            return
+        }
+        _state.update { it.copy(localInstanceStorage = storage, showPublicStorageRationale = false) }
+    }
+
+    /** 关闭授权说明弹窗（用户看完/拒绝）：未授权就继续选公共时自动退回私有。 */
+    fun dismissPublicStorageRationale(keepPublicChoice: Boolean) {
+        _state.update { s ->
+            s.copy(
+                showPublicStorageRationale = false,
+                localInstanceStorage = if (keepPublicChoice && s.publicStorageGranted) InstanceStorage.PUBLIC else InstanceStorage.PRIVATE,
+            )
+        }
+        if (!keepPublicChoice) _message.tryEmit("已改为应用私有目录，无需任何权限")
+    }
+
+    /** 弹窗上点「去系统授权」：收起弹窗但保留公共目录选择，回来授权成功后无需重选。 */
+    fun openPublicStorageSettings() {
+        _state.update { it.copy(showPublicStorageRationale = false) }
+    }
+
+    /** 弹窗上点「改用私有目录」（或直接关掉弹窗）。 */
+    fun dismissWithPrivateStorage() = dismissPublicStorageRationale(keepPublicChoice = false)
 
     /** 刷新本机可安装运行时（当前 ABI）。 */
     fun loadLocalRuntimes() {
@@ -330,7 +392,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    /** 本机默认保活 / SerialGC 从「本地开服设置」读取。 */
+    /** 本机默认保活 / SerialGC 从「本机运行时与开服设置」读取。 */
     private fun loadLocalDefaults() {
         viewModelScope.launch {
             runCatching { settingsStore.settingsFlow.first() }
@@ -344,7 +406,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                         )
                     }
                 }
-                .onFailure { AppLogger.w("Create", "读取本地开服默认设置失败", it) }
+                .onFailure { AppLogger.w("Create", "读取本机开服全局默认失败", it) }
         }
     }
 
@@ -742,7 +804,8 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
 
     /**
      * 本机创建：把已选定的 MSLAPI 核心（coreUrl/coreSha256/onlineGameVersion）下载到
-     * `filesDir/mslx/servers/<name>/server.jar`，并补全实例文件（eula/server.properties/instance.json），
+     * 实例目录下的 `server.jar`（位置由用户选：公共 `/storage/emulated/0/MSLX/servers/<名>`
+     * 或私有 `filesDir/mslx/servers/<名>`），并补全实例文件（eula/server.properties/instance.json），
      * 不经 Daemon / SignalR。成功后置 success + createdDirName，由界面跳统一本机控制台。
      */
     private fun submitLocal() {
@@ -756,26 +819,9 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
             return
         }
         val context = getApplication<Application>()
-        LocalStorage.migrateLegacy(context)
-        LocalStorage.ensureBase(context)
-        val serverDir = LocalStorage.serverDir(context, s.name)
-        val dirName = serverDir.name
         val runtime = LocalJreManager.runtimeById(s.selectedRuntimeId)
         // 核心名：选择器写入的 core 形如 "$core-$version.jar"，去掉后缀还原；无则用运行时 id 占位
         val coreName = s.core.removeSuffix("-${s.onlineGameVersion}.jar").ifBlank { "server" }
-        val meta = LocalInstanceMeta(
-            name = s.name,
-            directory = dirName,
-            runtimeId = runtime.id,
-            javaMajor = runtime.javaMajor,
-            abi = LocalJreManager.currentAbi(),
-            minMemMb = s.minM,
-            maxMemMb = s.maxM,
-            jvmArgs = s.args.trim(),
-            useSerialGc = s.localUseSerialGc,
-            keepAlive = s.localKeepAlive,
-            motd = s.name,
-        )
         _state.update {
             it.copy(
                 submitting = true,
@@ -783,17 +829,51 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                 error = null,
                 success = false,
                 creationProgress = 0.0,
-                createdDirName = dirName,
                 creationLogs = listOf(CreationLog("开始下载服务端核心 ${s.core}", null)),
             )
         }
         viewModelScope.launch {
+            LocalStorage.migrateLegacy(context)
+            val global = runCatching { settingsStore.settingsFlow.first() }.getOrDefault(AppSettings())
+            val placement = withContext(Dispatchers.IO) {
+                LocalInstanceStore.createDir(context, s.name, s.localInstanceStorage)
+            }
+            if (s.localInstanceStorage == InstanceStorage.PUBLIC && placement.storage == InstanceStorage.PRIVATE) {
+                // 未拿到「所有文件访问」：不阻断开服，静默降到私有并告知一句
+                _message.tryEmit("未获得公共目录权限，本次实例已建在应用私有目录")
+            }
+            val meta = LocalInstanceMeta(
+                name = s.name,
+                directory = placement.dirName,
+                runtimeId = runtime.id,
+                javaMajor = runtime.javaMajor,
+                abi = LocalJreManager.currentAbi(),
+                minMemMb = s.minM,
+                maxMemMb = s.maxM,
+                jvmArgs = s.args.trim(),
+                useSerialGc = s.localUseSerialGc,
+                keepAlive = s.localKeepAlive,
+                storage = placement.storage.key,
+                // 创建时没改过全局默认（内存/参数）→ 标记为跟随，以后改全局不用逐实例改
+                inheritGlobal = s.minM == global.localMinMemMb &&
+                    s.maxM == global.localMaxMemMb &&
+                    s.args.trim() == global.localJvmArgs.trim(),
+                motd = s.name,
+            )
+            _state.update {
+                it.copy(
+                    createdDirName = placement.dirName,
+                    localInstanceStorage = placement.storage,
+                    creationLogs = it.creationLogs +
+                        CreationLog("实例目录：${LocalStorage.displayPath(context, placement.dir)}", null),
+                )
+            }
             LocalCoreInstaller(repository).installFromUrl(
                 url = s.coreUrl,
                 sha256 = s.coreSha256,
                 core = coreName,
                 version = s.onlineGameVersion,
-                serverDir = serverDir,
+                serverDir = placement.dir,
                 meta = meta,
             ) { p ->
                 _state.update { it.copy(creationProgress = (p * 100.0).coerceIn(0.0, 100.0)) }

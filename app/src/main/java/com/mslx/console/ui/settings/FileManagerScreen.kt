@@ -18,7 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -209,7 +209,7 @@ private fun FileRow(item: FileItem, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = if (item.isFolder) Icons.Filled.List else Icons.Filled.Create,
+                imageVector = if (item.isFolder) Icons.AutoMirrored.Filled.List else Icons.Filled.Create,
                 contentDescription = null,
                 tint = if (item.isFolder) {
                     MaterialTheme.colorScheme.primary

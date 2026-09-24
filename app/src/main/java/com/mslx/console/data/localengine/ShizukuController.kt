@@ -186,6 +186,30 @@ object ShizukuController {
     fun remoteServerDir(dirName: String): String = "$REMOTE_BASE/servers/$dirName"
 
     /**
+     * 公共目录实例直跑时的**暂存区**：tmp/、user.home、native 解压都落在 shell 可写的
+     * `/data/local/tmp` 下（公共目录经 FUSE 挂载，部分设备对临时文件/文件锁不友好）。
+     */
+    fun remoteScratchDir(dirName: String): String = "$REMOTE_BASE/scratch/$dirName"
+
+    /** 建好暂存区子目录，返回远端根路径；失败返回原因。 */
+    suspend fun ensureScratch(dirName: String): Result<String> = withContext(Dispatchers.IO) {
+        val base = remoteScratchDir(dirName)
+        val res = exec(arrayOf("sh", "-c", "mkdir -p ${q("$base/tmp")} ${q("$base/home")} ${q("$base/natives")} && echo OK || echo NO"))
+        if (res.out.trim() == "OK") Result.success(base)
+        else Result.failure(IllegalStateException("创建暂存目录 $base 失败：${(res.err + res.out).trim().take(120)}"))
+    }
+
+    /**
+     * 探测 shell 能否在给定公共目录里读写（直跑前验一下）。
+     * 不能则退回传统的「stage 到 /data/local/tmp」路径，不让用户对着一个执不起来的报错发呆。
+     */
+    suspend fun canWriteRemotePath(path: String): Boolean = withContext(Dispatchers.IO) {
+        val probe = "$path/.mslx-shizuku-probe"
+        val res = exec(arrayOf("sh", "-c", "mkdir -p ${q(path)} && : > ${q(probe)} && rm -f ${q(probe)} && echo OK || echo NO"))
+        res.out.trim() == "OK"
+    }
+
+    /**
      * 确保 JRE 已 stage 到 `/data/local/tmp/mslx/runtime/<id>`（一次性，带完成标记）。
      * 返回远端 JRE 根目录；失败返回原因。
      */
@@ -281,7 +305,7 @@ object ShizukuController {
             else Result.failure(IllegalStateException("推送实例目录到 $remote 失败"))
         }
 
-    /** 停止后把 world/logs/配置从远端回同步到私有目录（权威存储）。 */
+    /** 停止后把 world/logs/配置从远端回同步到本地目录（权威存储）。 */
     suspend fun syncInstanceBack(dirName: String, localDir: File): Boolean =
         withContext(Dispatchers.IO) {
             val remote = remoteServerDir(dirName)
