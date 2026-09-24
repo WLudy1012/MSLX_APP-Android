@@ -50,7 +50,8 @@ fun LogViewerScreen(onBack: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     // 只渲染末尾 200K 字符，避免单个 Text 渲染 1MB 日志造成卡顿；复制/导出仍用全文
-    val displayLogs = logs.takeLast(200_000)
+    // remember(logs)：日志内容不变时不重复截取子串
+    val displayLogs = remember(logs) { logs.takeLast(200_000) }
     // 打开日志时自动滚到最后一行（最新日志在末尾，用户通常就是想看最新的）
     val scrollState = rememberScrollState()
     LaunchedEffect(scrollState.maxValue, displayLogs) {

@@ -239,13 +239,6 @@ fun AppNavHost(
 
             composable(Routes.SETTINGS) {
                 SettingsScreen(
-                    onOpenHome = { navigateTopLevel(Routes.HOME) },
-                    onOpenInstances = {
-                        navigateTopLevel(Routes.INSTANCES)
-                    },
-                    onOpenNewInstance = {
-                        navigateTopLevel(Routes.NEW_INSTANCE)
-                    },
                     onAddDaemon = {
                         navController.navigate(Routes.connect(false)) { launchSingleTop = true }
                     },
@@ -263,10 +256,6 @@ fun AppNavHost(
                     },
                     onOpenAbout = {
                         navController.navigate(Routes.ABOUT) { launchSingleTop = true }
-                    },
-                    onOpenLocalServer = {
-                        // 退役独立 LocalHostScreen：本机开服并入统一创建向导（目标=本机）
-                        navigateTopLevel(Routes.NEW_INSTANCE)
                     },
                     onOpenLocalServerSettings = {
                         navController.navigate(Routes.LOCAL_SERVER_SETTINGS) { launchSingleTop = true }

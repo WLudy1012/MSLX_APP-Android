@@ -56,6 +56,10 @@ import com.mslx.console.data.model.PropSchema
 import com.mslx.console.data.model.PropType
 import com.mslx.console.data.model.SERVER_PROPERTIES_SCHEMA
 
+/** 静态 schema 的派生索引：避免每次重组都重建 Set / 分组 Map。 */
+private val KNOWN_PROPERTY_KEYS: Set<String> = SERVER_PROPERTIES_SCHEMA.map { it.key }.toSet()
+private val PROPERTY_GROUPS: Map<String, List<PropSchema>> = SERVER_PROPERTIES_SCHEMA.groupBy { it.group }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ServerPropertiesScreen(
@@ -120,8 +124,7 @@ fun ServerPropertiesScreen(
 
             else -> {
                 val values = state.values
-                val knownKeys = SERVER_PROPERTIES_SCHEMA.map { it.key }.toSet()
-                val unknownKeys = values.keys.filter { it !in knownKeys }
+                val unknownKeys = remember(values) { values.keys.filter { it !in KNOWN_PROPERTY_KEYS } }
 
                 LazyColumn(
                     modifier = Modifier
@@ -148,10 +151,10 @@ fun ServerPropertiesScreen(
                         }
                     }
 
-                    SERVER_PROPERTIES_SCHEMA.groupBy { it.group }.forEach { (group, props) ->
+                    PROPERTY_GROUPS.forEach { (group, props) ->
                         val visible = props.filter { values.containsKey(it.key) }
                         if (visible.isNotEmpty()) {
-                            item { SectionTitle(group) }
+                            item(key = "group_$group") { SectionTitle(group) }
                             visible.forEach { prop ->
                                 item(key = "known_${prop.key}") {
                                     PropCard(
@@ -165,7 +168,7 @@ fun ServerPropertiesScreen(
                     }
 
                     if (unknownKeys.isNotEmpty()) {
-                        item { SectionTitle("未收录配置项") }
+                        item(key = "group_unknown") { SectionTitle("未收录配置项") }
                         unknownKeys.forEach { key ->
                             item(key = "unknown_$key") {
                                 PropCard(

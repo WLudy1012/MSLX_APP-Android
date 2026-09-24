@@ -11,6 +11,7 @@ import com.mslx.console.data.model.CommandResultPayload
  *  - 客户端调用：JoinGroup(instanceId)、LeaveGroup(instanceId)、SendCommand(instanceId, command)
  *  - 服务端推送：ReceiveLog(string)、CommandResult({success,message})、RequireEULA()
  *
+ * 断线自动重连由 [ReconnectingHubClient] 提供（重连成功自动重新 JoinGroup）。
  * 注意：连接、断开均为阻塞网络操作，务必在 IO 线程调用。
  */
 class ConsoleHubClient(
@@ -20,46 +21,34 @@ class ConsoleHubClient(
     private val onLog: (String) -> Unit,
     private val onCommandResult: (CommandResultPayload) -> Unit,
     private val onEulaRequired: () -> Unit,
-) {
-    @Volatile
-    private var connection: HubConnection? = null
+) : ReconnectingHubClient("ConsoleHub") {
 
-    val isConnected: Boolean get() = connection != null
-
-    fun connect() {
-        if (connection != null) return
+    override fun buildConnection(): HubConnection {
         val url = "${baseUrl.trimEnd('/')}/api/hubs/instanceControlHub"
-
-        val hub = HubConnectionBuilder.create(url)
+        val connection = HubConnectionBuilder.create(url)
             .withHeader("x-api-key", apiKey)
             .setHttpClientBuilderCallback { builder -> ApiClient.configureDaemonHttpClient(builder) }
             .build()
 
-        hub.on("ReceiveLog", { log: String -> onLog(log) }, String::class.java)
-        hub.on(
+        connection.on("ReceiveLog", { log: String -> onLog(log) }, String::class.java)
+        connection.on(
             "CommandResult",
             { result: CommandResultPayload -> onCommandResult(result) },
             CommandResultPayload::class.java,
         )
-        hub.on("RequireEULA", { onEulaRequired() })
+        connection.on("RequireEULA", { onEulaRequired() })
+        return connection
+    }
 
-        hub.start().blockingAwait()
-        connection = hub
-        hub.send("JoinGroup", instanceId)
+    override fun onOpened(connection: HubConnection) {
+        connection.send("JoinGroup", instanceId)
+    }
+
+    override fun onDisconnect(connection: HubConnection) {
+        connection.send("LeaveGroup", instanceId)
     }
 
     fun sendCommand(command: String) {
-        connection?.send("SendCommand", instanceId, command)
-    }
-
-    fun disconnect() {
-        val hub = connection ?: return
-        connection = null
-        try {
-            hub.send("LeaveGroup", instanceId)
-            hub.stop().blockingAwait()
-        } catch (_: Exception) {
-            // 断开阶段忽略异常，避免影响界面退出
-        }
+        hub?.send("SendCommand", instanceId, command)
     }
 }

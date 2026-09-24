@@ -3,6 +3,7 @@ package com.mslx.console.data.remote
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import com.mslx.console.BuildConfig
 import com.mslx.console.data.AppLogger
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -13,8 +14,11 @@ import javax.net.ssl.X509TrustManager
 
 object ApiClient {
 
-    /** 客户端 User-Agent（发版时与 build.gradle.kts 的 versionName 保持同步）。 */
-    private const val USER_AGENT = "MSLX-Android/1.7"
+    /**
+     * 客户端 User-Agent：直接读 BuildConfig.VERSION_NAME（CI Actions 渠道为 x.x.x.x 形态），
+     * 发版时不再需要手工同步版本号。
+     */
+    private val USER_AGENT = "MSLX-Android/${BuildConfig.VERSION_NAME}"
 
     fun build(baseUrl: String, apiKey: String): MslxApi {
         val builder = OkHttpClient.Builder()
@@ -44,7 +48,16 @@ object ApiClient {
     }
 
     /**
-     * 给 OkHttpClient.Builder 配置信任所有证书的 SSL（仅守护进程内网自签场景使用）。
+     * 给 OkHttpClient.Builder 配置信任所有证书的 SSL。
+     *
+     * 适用边界（必须严格限定）：仅用于连接**用户自己部署的 Daemon**——其自签证书无法被
+     * Android 系统信任链校验，放开校验是可用性前置条件；不用于任何第三方公开服务
+     * （公开 API 客户端在本类中单独构建，不经过本方法）。
+     *
+     * 风险知情：本方法等价于“已关闭证书校验”——连接存在被中间人窃听/篡改的可能；
+     * 因此连接向导的 HTTP 明文警告弹窗会同时向用户明示这一点。
+     * 不使用证书固定（证书固定会在用户更换自签证书后直接断连，维护成本大于收益）。
+     *
      * sslSocketFactory 与 hostnameVerifier 使用同一个 X509TrustManager 实例。
      */
     fun configureDaemonHttpClient(builder: OkHttpClient.Builder) {

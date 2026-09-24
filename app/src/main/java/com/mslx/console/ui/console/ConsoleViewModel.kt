@@ -1,6 +1,7 @@
 package com.mslx.console.ui.console
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
@@ -8,20 +9,43 @@ import com.mslx.console.data.AppLogger
 import com.mslx.console.data.remote.ConsoleHubClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicLong
 
 /** 已同意 EULA 的 eula.txt 内容（与守护进程 AgreeEULA 写入格式一致）。 */
 private const val EULA_AGREED_CONTENT =
     "#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\n#MSLX-Android auto agreed\neula=true\n"
 
-data class LogLine(val text: String, val system: Boolean = false)
+/** 日志保留上限（超出后从头部裁剪）。 */
+private const val MAX_LOG_LINES = 3000
+
+/** 微批窗口：把窗口内到达的日志合并为一次 StateFlow 更新（降低重组与列表拷贝频率）。 */
+private const val LOG_BATCH_WINDOW_MS = 40L
+
+/** 单批最大行数：防止超长突发把单次合并放大到不可控。 */
+private const val LOG_BATCH_MAX_LINES = 512
+
+/** 日志行；[id] 供 UI 层 LazyColumn 用作稳定 item key（自动递增，不参与业务语义）。 */
+data class LogLine(
+    val text: String,
+    val system: Boolean = false,
+    val id: Long = idGenerator.incrementAndGet(),
+) {
+    companion object {
+        private val idGenerator = AtomicLong()
+    }
+}
 
 sealed interface ConsoleEvent {
     data class Toast(val message: String) : ConsoleEvent
@@ -58,16 +82,26 @@ class ConsoleViewModel(
 
     private var client: ConsoleHubClient? = null
 
+    /** 日志入队通道（无界、非阻断）：SignalR 回调线程 trySend，不阻塞网络回调。 */
+    private val incomingLogs = Channel<LogLine>(Channel.UNLIMITED)
+
+    /** 已渲染日志的底层缓冲（仅日志协程访问），发布时拷贝快照给 StateFlow。 */
+    private val renderBuffer = ArrayDeque<LogLine>()
+
     init {
+        // 日志微批消费：攒批后一次性发布，取代逐行全量拷贝与重复重组
+        viewModelScope.launch { drainLogs() }
         viewModelScope.launch {
             loadInfo()
             connectHub()
         }
-        // 周期性刷新状态(运行时长、在线人数、启停状态)
+        // 周期性刷新状态(运行时长、在线人数、启停状态)；顺带同步控制台连接实况
+        // （断线自动重连期间 UI 显示“正在重连”，连上后错误提示自动消失）
         viewModelScope.launch {
             while (true) {
                 try {
                     loadInfo()
+                    syncConnectionState()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -105,10 +139,10 @@ class ConsoleViewModel(
     private suspend fun connectHub() {
         val hubClient = repository.createConsoleClient(
             instanceId = instanceId,
-            onLog = { line -> appendLogs(listOf(LogLine(line))) },
+            onLog = { line -> enqueueLogs(listOf(LogLine(line))) },
             onCommandResult = { result ->
                 if (!result.success) {
-                    appendLogs(listOf(LogLine(">>> ${result.message ?: "命令发送失败"}", system = true)))
+                    enqueueLogs(listOf(LogLine(">>> ${result.message ?: "命令发送失败"}", system = true)))
                 }
             },
             onEulaRequired = { _events.tryEmit(ConsoleEvent.EulaRequired) },
@@ -116,14 +150,13 @@ class ConsoleViewModel(
         client = hubClient
         try {
             withContext(Dispatchers.IO) { hubClient.connect() }
-            _state.update { it.copy(connecting = false, connected = true) }
+            _state.update { it.copy(connecting = false, connected = true, connectionError = null) }
         } catch (e: Exception) {
             _state.update {
                 it.copy(connecting = false, connected = false, connectionError = formatConnectionError(e))
             }
         }
     }
-
     /**
      * 将控制台 SignalR 连接异常格式化为面向用户的提示：
      * 异常链包含 websocket / negotiate / transport（大小写不敏感）时，
@@ -152,7 +185,7 @@ class ConsoleViewModel(
     override fun sendCommand(command: String) {
         val cmd = command.trim()
         if (cmd.isEmpty()) return
-        appendLogs(listOf(LogLine("> $cmd")))
+        enqueueLogs(listOf(LogLine("> $cmd")))
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 runCatching { client?.sendCommand(cmd) }
@@ -205,18 +238,60 @@ class ConsoleViewModel(
     }
 
     override fun clearLogs() {
+        renderBuffer.clear()
         _logs.value = emptyList()
     }
 
-    private fun appendLogs(new: List<LogLine>) {
-        // 用原子 update 保证 SignalR 回调线程并发追加时不丢日志
-        _logs.update { current ->
-            val merged = current + new
-            if (merged.size > 3000) merged.takeLast(3000) else merged
+    /** 入队日志（非阻断；SignalR 回调线程可安全调用），由 [drainLogs] 微批后统一发布。 */
+    private fun enqueueLogs(lines: List<LogLine>) {
+        lines.forEach { incomingLogs.trySend(it) }
+    }
+
+    /**
+     * 日志微批消费者：
+     * 等到第一条日志后，在最多 [LOG_BATCH_WINDOW_MS]（或 [LOG_BATCH_MAX_LINES] 行）窗口内
+     * 把陆续到达的日志攒成一批，一次性合并进 StateFlow，消除逐行追加时的
+     * O(n) 全量拷贝与 3000 行封顶时的重复重组。
+     */
+    private suspend fun drainLogs() {
+        while (currentCoroutineContext().isActive) {
+            val first = incomingLogs.receiveCatching().getOrNull() ?: return
+            val batch = ArrayList<LogLine>(64).apply { add(first) }
+            val deadline = SystemClock.uptimeMillis() + LOG_BATCH_WINDOW_MS
+            while (batch.size < LOG_BATCH_MAX_LINES) {
+                val remain = deadline - SystemClock.uptimeMillis()
+                if (remain <= 0) break
+                val next = withTimeoutOrNull(remain) { incomingLogs.receiveCatching().getOrNull() } ?: break
+                batch.add(next)
+            }
+            flushBatch(batch)
+        }
+    }
+
+    /** 把一批日志合并进渲染缓冲并发布快照（缓冲只在日志协程内访问，无需加锁）。 */
+    private fun flushBatch(batch: List<LogLine>) {
+        renderBuffer.addAll(batch)
+        while (renderBuffer.size > MAX_LOG_LINES) renderBuffer.removeFirst()
+        _logs.value = renderBuffer.toList()
+    }
+
+    /** 用 Hub 的真实连接状态校正 UI：自动重连成功后错误提示自动消失。 */
+    private fun syncConnectionState() {
+        val live = client?.isConnected ?: return
+        val current = _state.value
+        if (current.connecting) return
+        if (current.connected != live || (live && current.connectionError != null)) {
+            _state.update {
+                it.copy(
+                    connected = live,
+                    connectionError = if (live) null else it.connectionError,
+                )
+            }
         }
     }
 
     override fun onCleared() {
+        incomingLogs.close()
         val hub = client
         client = null
         if (hub != null) {

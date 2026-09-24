@@ -8,7 +8,27 @@ main:
         image: mobiledevops/android-sdk-image:34.0.1
         volumes:
           - /root/.gradle:cow
+          # Android SDK 全目录（含 NDK 下载产物）持久化：NDK 约 1GB，避免每次全新下载。
+          # cow(OverlayFS 写时复制)：镜像自带 SDK 内容作为下层可见，新增文件写入卷中复用。
+          - /opt/android-sdk-linux:cow
       stages:
+        # 仅当 NDK 目录缺失（首次构建 / 版本升级）时才执行安装，日常构建秒过。
+        # 失败不阻断：AGP 在构建时仍会自动补装（licenses 已接受并随卷持久化）。
+        - name: warm up android sdk (ndk)
+          script: |
+            set -eu
+            NDK=/opt/android-sdk-linux/ndk/28.2.13676358
+            if [ -d "$NDK" ]; then
+              echo "NDK 28.2.13676358 已缓存，跳过预热"
+              exit 0
+            fi
+            SDKMAN=$(ls /opt/android-sdk-linux/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1 || true)
+            if [ -z "$SDKMAN" ]; then
+              echo "警告：未找到 sdkmanager，NDK 将由 AGP 在构建时自动下载" >&2
+              exit 0
+            fi
+            yes | "$SDKMAN" --licenses > /dev/null 2>&1 || true
+            yes | "$SDKMAN" "ndk;28.2.13676358" || echo "警告：NDK 预装失败，交由 AGP 自动下载" >&2
         - name: verify embedded jre runtime
           script: |
             set -eu
@@ -30,10 +50,28 @@ $:
         image: mobiledevops/android-sdk-image:34.0.1
         volumes:
           - /root/.gradle:cow
+          # Android SDK 全目录（含 NDK）持久化，避免每次发版重新下载约 1GB 的 NDK
+          - /opt/android-sdk-linux:cow
       imports:
         # 私有密钥仓库文件（用户自建，勿公开）：内含 KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD
         https://cnb.cool/WLudy/MSLX-secrets/-/blob/main/keystore.yml
       stages:
+        # 仅当 NDK 目录缺失时才执行安装，失败不阻断（AGP 自动补齐）
+        - name: warm up android sdk (ndk)
+          script: |
+            set -eu
+            NDK=/opt/android-sdk-linux/ndk/28.2.13676358
+            if [ -d "$NDK" ]; then
+              echo "NDK 28.2.13676358 已缓存，跳过预热"
+              exit 0
+            fi
+            SDKMAN=$(ls /opt/android-sdk-linux/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1 || true)
+            if [ -z "$SDKMAN" ]; then
+              echo "警告：未找到 sdkmanager，NDK 将由 AGP 在构建时自动下载" >&2
+              exit 0
+            fi
+            yes | "$SDKMAN" --licenses > /dev/null 2>&1 || true
+            yes | "$SDKMAN" "ndk;28.2.13676358" || echo "警告：NDK 预装失败，交由 AGP 自动下载" >&2
         - name: restore signing keystore
           script: |
             set -eu

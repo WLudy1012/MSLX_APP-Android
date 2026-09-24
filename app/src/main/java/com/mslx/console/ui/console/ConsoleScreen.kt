@@ -51,8 +51,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,6 +70,7 @@ import com.mslx.console.ui.theme.ConsoleBackground
 import com.mslx.console.ui.theme.ConsoleSystem
 import com.mslx.console.ui.theme.ConsoleText
 import com.mslx.console.ui.theme.ConsoleTextStyle
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,6 +107,19 @@ fun ConsoleScreen(
         if (autoScroll && logs.isNotEmpty()) {
             listState.scrollToItem(logs.size - 1)
         }
+    }
+
+    // 视口高度变化（点击输入框弹出 IME / 收起键盘/旋转）后，日志区需要重新贴底，
+    // 否则键盘会遮住最新日志（仅靠 logs.size 变化无法触发，因为此次没有新日志）
+    val latestLogCount by rememberUpdatedState(logs.size)
+    LaunchedEffect(listState, autoScroll) {
+        snapshotFlow { listState.layoutInfo.viewportSize.height }
+            .filter { it > 0 }
+            .collect {
+                if (autoScroll && latestLogCount > 0) {
+                    listState.scrollToItem(latestLogCount - 1)
+                }
+            }
     }
 
     // 处理一次性事件(提示 / EULA 弹窗)
@@ -182,18 +198,9 @@ fun ConsoleScreen(
                 },
             )
 
-            // 连接状态提示
+            // 连接状态提示（三态：正在连接 / 连接失败 / 断线自动重连中）
             if (state.connecting) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text("正在连接控制台…", style = MaterialTheme.typography.bodySmall)
-                }
+                ConnectionStatusRow(text = "正在连接控制台…", showSpinner = true)
             } else if (state.connectionError != null) {
                 Row(
                     modifier = Modifier
@@ -209,6 +216,8 @@ fun ConsoleScreen(
                     )
                     TextButton(onClick = viewModel::retryConnect) { Text("重连") }
                 }
+            } else if (!state.connected) {
+                ConnectionStatusRow(text = "连接已断开，正在自动重连…", showSpinner = true)
             }
 
             // 控制台日志区域(深色终端风格，圆角卡片)
@@ -273,8 +282,8 @@ fun ConsoleScreen(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         ) {
-                            items(logs.size) { index ->
-                                val line = logs[index]
+                            // key = 日志行稳定 id：列表裁剪/追加时保持条目身份，避免整表重组
+                            items(items = logs, key = { it.id }) { line ->
                                 // ANSI 原彩：按转义序列拆段着色，未着色段继承默认前景色
                                 val segments = remember(line.text) { parseAnsiLog(line.text) }
                                 val baseColor = if (line.system) ConsoleSystem else ConsoleText
@@ -397,6 +406,23 @@ fun ConsoleScreen(
                 TextButton(onClick = { showEulaDialog = false }) { Text("取消") }
             },
         )
+    }
+}
+
+/** 连接状态提示行（正在连接 / 自动重连中复用同一渲染）。 */
+@Composable
+private fun ConnectionStatusRow(text: String, showSpinner: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (showSpinner) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(text, style = MaterialTheme.typography.bodySmall)
     }
 }
 

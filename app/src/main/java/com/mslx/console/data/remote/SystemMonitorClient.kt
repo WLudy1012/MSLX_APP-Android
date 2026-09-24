@@ -12,6 +12,7 @@ import com.mslx.console.data.model.SystemStatsEnvelope
  *  - 客户端调用：JoinMonitor()、LeaveMonitor()
  *  - 服务端推送：ReceiveSystemStats(单参数对象 { local: NodeStatsPayload, slaves: {...} })
  *
+ * 断线自动重连由 [ReconnectingHubClient] 提供（重连成功自动重新 JoinMonitor）。
  * 注意：连接、断开均为阻塞网络操作，务必在 IO 线程调用。
  *
  * 坑（已字节码级确认）：服务端推的是对象而非字符串，若用 String::class.java 接收，
@@ -23,43 +24,27 @@ class SystemMonitorClient(
     private val baseUrl: String,
     private val apiKey: String,
     private val onStats: (NodeStatsPayload) -> Unit,
-) {
-    private var connection: HubConnection? = null
+) : ReconnectingHubClient("SystemHub") {
 
-    @Volatile
-    var isConnected: Boolean = false
-        private set
-
-    fun connect() {
-        if (connection != null) return
-        val hub = HubConnectionBuilder
+    override fun buildConnection(): HubConnection {
+        val connection = HubConnectionBuilder
             .create("${baseUrl.trimEnd('/')}/api/hubs/system")
             .withHeader("x-api-key", apiKey)
             .setHttpClientBuilderCallback { builder -> ApiClient.configureDaemonHttpClient(builder) }
             .build()
-        hub.on(
+        connection.on(
             "ReceiveSystemStats",
             { envelope: SystemStatsEnvelope -> envelope.local?.let(onStats) },
             SystemStatsEnvelope::class.java,
         )
-        hub.onClosed { _: Exception? ->
-            isConnected = false
-        }
-        hub.start().blockingAwait()
-        connection = hub
-        isConnected = true
-        hub.send("JoinMonitor")
+        return connection
     }
 
-    fun disconnect() {
-        val hub = connection ?: return
-        connection = null
-        isConnected = false
-        try {
-            hub.send("LeaveMonitor")
-            hub.stop().blockingAwait()
-        } catch (_: Exception) {
-            // 断开阶段忽略异常
-        }
+    override fun onOpened(connection: HubConnection) {
+        connection.send("JoinMonitor")
+    }
+
+    override fun onDisconnect(connection: HubConnection) {
+        connection.send("LeaveMonitor")
     }
 }

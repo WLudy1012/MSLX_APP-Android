@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -261,8 +262,14 @@ private fun FormContent(
         Spacer(Modifier.height(12.dp))
 
         // 切换步骤时内容淡入淡出动画
+        // 注意：weight 必须交给 AnimatedContent 自身（它是外层 Column 的直接子项，
+        // ColumnScope.weight 才会被消费）；写在内部的 Column 上会因父级不消费而失效，
+        // 导致面板按内容固有高度撑开、把底部“上一步/下一步”按钮挤压变扁。
         androidx.compose.animation.AnimatedContent(
             targetState = state.step,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
             transitionSpec = {
                 (fadeIn(tween(180)) + slideInHorizontally(tween(180)) { it / 8 })
                     .togetherWith(fadeOut(tween(120)) + slideOutHorizontally(tween(120)) { -it / 8 })
@@ -272,7 +279,12 @@ private fun FormContent(
             // 必须使用 AnimatedContent 传入的 targetStep（而非外层的 current），
             // 否则退场/入场两个面板会渲染同一份新内容，步骤切换动画失效。
             val paneStep = steps.getOrNull(targetStep)
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 when (paneStep?.key) {
                     "basic" -> BasicStep(state, onUpdate)
                     "core" -> CoreStep(state, onUpdate, onOpenCoreSelector, onClearCore, onRemoveUpload, onPickJar)
@@ -286,19 +298,26 @@ private fun FormContent(
         }
 
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // 底部按钮行：固定最小高度，任何步骤面板都不会把它压缩变扁
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             if (state.step > 0) {
-                OutlinedButton(onClick = onPrev, modifier = Modifier.weight(1f)) { Text("上一步") }
+                OutlinedButton(onClick = onPrev, modifier = Modifier.weight(1f).height(48.dp)) { Text("上一步") }
             }
             if (current?.key == "confirm") {
-                Button(onClick = onSubmit, enabled = !state.submitting, modifier = Modifier.weight(1f)) {
+                Button(onClick = onSubmit, enabled = !state.submitting, modifier = Modifier.weight(1f).height(48.dp)) {
                     if (state.submitting) {
                         CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp), strokeWidth = 2.dp)
                     }
                     Text(if (state.submitting) "提交中..." else "确认创建", fontWeight = FontWeight.SemiBold)
                 }
             } else {
-                Button(onClick = onNext, modifier = Modifier.weight(1f)) { Text("下一步") }
+                Button(onClick = onNext, modifier = Modifier.weight(1f).height(48.dp)) { Text("下一步") }
             }
         }
     }
@@ -502,10 +521,12 @@ private fun JavaStep(
 private data class PendingJava(val type: String, val version: String, val localPath: String? = null)
 
 /** 解析 Java 主版本号:`1.8.0_401` -> 8,`17.0.10` -> 17,`21` -> 21。 */
+private val JAVA_MAJOR_VERSION_REGEX = Regex("^(\\d+)(?:\\.(\\d+))?")
+
 private fun parseJavaMajorVersion(version: String): Int? {
     val trimmed = version.trim()
     trimmed.toIntOrNull()?.let { return it }
-    val match = Regex("^(\\d+)(?:\\.(\\d+))?").find(trimmed) ?: return null
+    val match = JAVA_MAJOR_VERSION_REGEX.find(trimmed) ?: return null
     val first = match.groupValues[1].toIntOrNull() ?: return null
     val second = match.groupValues[2].toIntOrNull()
     return if (first == 1 && second != null) second else first

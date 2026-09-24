@@ -13,6 +13,9 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    env:
+      # ubuntu runner 自带 SDK 的固定路径；缓存 NDK 等组件时需要以 env 形式引用
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,6 +30,23 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      # Android SDK 组件缓存：NDK（约 1GB）是最大耗时项，当前每次全新构建都要下载。
+      # 缓存 miss 时 AGP 会自动下载并在 job 结束时由本 step 回写缓存。
+      # 注意：Gradle 依赖缓存（~/.gradle）由下面的 gradle/actions/setup-gradle 负责
+      #（其内部就是基于 actions/cache 的官方实现），这里不要重复缓存 ~/.gradle，
+      # 否则两套缓存系统还原到同一目录会互相覆盖。
+      - name: Cache Android SDK (NDK / platform / build-tools)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_SDK_ROOT }}/ndk/28.2.13676358
+            ${{ env.ANDROID_SDK_ROOT }}/platforms/android-35
+            ${{ env.ANDROID_SDK_ROOT }}/build-tools/35.0.0
+          # key 写入组件版本：升级 NDK/SDK 时 key 自然失效，缓存随之重建
+          key: android-sdk-35-ndk-28.2.13676358-${{ runner.os }}-${{ runner.arch }}
+          restore-keys: |
+            android-sdk-35-ndk-28.2.13676358-${{ runner.os }}-
 
       # 不用 android-actions/setup-android@v3：它在末尾会执行 `sdkmanager tools`，而 Google
       # 已把 `tools` 包从仓库下架（Warning: Failed to find package 'tools' → exit 1），
@@ -50,6 +70,17 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      # 依赖缓存健康检查（非阻断）：缓存完整时依赖解析可零网络通过
+      #（即 install 阶段无需联网）；首次构建或依赖有更新时失败，仅提示正式构建会联网补齐。
+      - name: Verify dependency cache (offline dry-run)
+        run: |
+          chmod +x gradlew
+          if ./gradlew :app:dependencies --offline -q > /dev/null 2>&1; then
+            echo "依赖缓存完整：offline 解析通过（install 阶段可零网络完成）"
+          else
+            echo "::warning::offline 解析未完全通过（首次构建或依赖已更新），正式构建将联网补齐"
+          fi
 
       # 本机开服需要内嵌 JRE：归档缺失会让 dev 构建的调试包装不上运行时
       - name: Verify embedded JRE runtime

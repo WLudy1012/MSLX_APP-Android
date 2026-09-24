@@ -1,0 +1,88 @@
+name: Auto Issue Review
+
+on:
+  issues:
+    types: [opened]          # 仅在新建 Issue 时自动触发，无需标签
+
+permissions:
+  contents: read             # 读取 Prompt 文件
+  issues: write              # 添加评论和标签
+  models: read               # 调用 GitHub Models 推理 API
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch issue title and body
+        id: issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            core.setOutput('title', issue.data.title);
+            core.setOutput('body', issue.data.body || '');
+            core.setOutput('existing_labels', issue.data.labels.map(l => l.name).join(','));
+
+      - name: Run AI review
+        id: ai
+        uses: actions/ai-inference@v1
+        with:
+          model: openai/gpt-4o-mini
+          prompt-file: ./Prompts/issue-review.prompt.yml
+          input: |
+            Title: ${{ steps.issue.outputs.title }}
+            Body: ${{ steps.issue.outputs.body }}
+
+      - name: Parse and apply AI output
+        uses: actions/github-script@v7
+        env:
+          AI_RESPONSE: ${{ steps.ai.outputs.response }}
+        with:
+          script: |
+            const raw = process.env.AI_RESPONSE;
+            let parsed;
+            try {
+              // 尝试从响应中提取 JSON 对象
+              const match = raw.match(/\{[\s\S]*\}/);
+              parsed = JSON.parse(match ? match[0] : raw);
+            } catch (e) {
+              core.warning('AI response is not valid JSON, skipping label/comment.');
+              return;
+            }
+
+            const allowedLabels = [
+              'bug', 'enhancement', 'question', 'documentation',
+              'good first issue', 'help wanted', 'duplicate',
+              'needs-info', 'priority/critical', 'priority/high', 'priority/low'
+            ];
+
+            const existingLabels = '${{ steps.issue.outputs.existing_labels }}'
+              .split(',').filter(Boolean);
+
+            const labelsToApply = (parsed.labels || [])
+              .filter(l => allowedLabels.includes(l) && !existingLabels.includes(l));
+
+            if (labelsToApply.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labelsToApply
+              });
+            }
+
+            if (parsed.comment && parsed.comment.trim()) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `##AI 自动评审\n\n${parsed.comment}`
+              });
+            }

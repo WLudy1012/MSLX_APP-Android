@@ -82,6 +82,8 @@ android {
 
     buildFeatures {
         compose = true
+        // ApiClient 的 User-Agent 读 BuildConfig.VERSION_NAME（与 versionName 自动同步）
+        buildConfig = true
     }
 
     lint {

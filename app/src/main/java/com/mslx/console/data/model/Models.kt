@@ -72,7 +72,20 @@ data class UserInfo(
     @SerializedName("lastLoginTime") val lastLoginTime: String? = null,
     @SerializedName("resources") val resources: List<String> = emptyList(),
     @SerializedName("openMSLID") val openMSLID: String? = null,
-)
+) {
+    /**
+     * 是否为系统内置账号。
+     *
+     * 以 role == "system" 为主判据（上游面板系统账号的真实标志）；
+     * 账号名作为兼容兜底：历史/自定义部署存在名为「MSLX Manger」（上游拼写如此，
+     * 非笔误）的账号，同时容忍正确拼写 Manager，避免因名称差异漏判。
+     */
+    val isSystemUser: Boolean
+        get() = role.equals("system", ignoreCase = true) ||
+            username.orEmpty().let {
+                it.equals("MSLX Manger", ignoreCase = true) || it.equals("MSLX Manager", ignoreCase = true)
+            }
+}
 
 data class FrpSummary(
     @SerializedName("id") val id: Int = 0,

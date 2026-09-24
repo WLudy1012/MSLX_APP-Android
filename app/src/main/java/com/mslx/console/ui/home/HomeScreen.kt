@@ -41,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -428,6 +429,10 @@ private fun InstanceSummaryCard(state: HomeUiState, onOpenInstances: () -> Unit)
 @Composable
 private fun NotificationRow(notification: ServerNotification) {
     val color = if (notification.isOpened) androidx.compose.ui.graphics.Color(0xFF2E7D32) else androidx.compose.ui.graphics.Color(0xFFFB8C00)
+    // 同一时间戳只格式化一次：避免每次重组都新建 SimpleDateFormat
+    val timeText = remember(notification.time) {
+        SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(notification.time))
+    }
     Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -446,7 +451,7 @@ private fun NotificationRow(notification: ServerNotification) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = formatTime(notification.time),
+                    text = timeText,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -460,9 +465,6 @@ private fun NotificationRow(notification: ServerNotification) {
         }
     }
 }
-
-private fun formatTime(time: Long): String =
-    SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(time))
 
 private fun Double.formatMetric(): String = String.format(Locale.US, "%.1f", this)
 

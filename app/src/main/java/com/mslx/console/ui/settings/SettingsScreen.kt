@@ -61,16 +61,12 @@ import com.mslx.console.ui.update.UpdateViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onOpenHome: () -> Unit,
-    onOpenInstances: () -> Unit,
-    onOpenNewInstance: () -> Unit,
     onAddDaemon: () -> Unit,
     onEditDaemon: (String) -> Unit,
     onOpenUserCenter: () -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenAbout: () -> Unit,
-    onOpenLocalServer: () -> Unit,
     onOpenLocalServerSettings: () -> Unit,
     onOpenServers: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
@@ -113,7 +109,8 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            // ---- 用户中心入口 ----
+            // ---- 账号 ----
+            SectionTitle("账号")
             Card(
                 onClick = onOpenUserCenter,
                 shape = RoundedCornerShape(16.dp),
@@ -178,6 +175,29 @@ fun SettingsScreen(
 
             Spacer(Modifier.size(20.dp))
 
+            // ---- 服务端 ----
+            // 「本机开服」入口已删除（与底部「新建」tab 完全重复）；
+            // 本机运行时的配置统一收敛到「本机运行时与开服设置」。
+            SectionTitle("服务端")
+            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                Column {
+                    EntryRow(
+                        icon = { Icon(Icons.AutoMirrored.Filled.List, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "服务端总览",
+                        subtitle = "多 Daemon 连接状态 + 本机/云端实例统一管理",
+                        onClick = onOpenServers,
+                    )
+                    EntryRow(
+                        icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "本机运行时与开服设置",
+                        subtitle = "内存、JVM 参数、后台保活、Java 运行时",
+                        onClick = onOpenLocalServerSettings,
+                    )
+                }
+            }
+
+            Spacer(Modifier.size(20.dp))
+
             // ---- 通用 ----
             SectionTitle("通用")
             Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
@@ -211,24 +231,6 @@ fun SettingsScreen(
                         subtitle = "版本、更新说明与贡献者",
                         onClick = onOpenAbout,
                     )
-                    EntryRow(
-                        icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "本机开服",
-                        subtitle = "在手机上直接开服（进程内 JVM，无需 Termux）",
-                        onClick = onOpenLocalServer,
-                    )
-                    EntryRow(
-                        icon = { Icon(Icons.Filled.Settings, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "本地开服设置",
-                        subtitle = "内存、JVM 参数、后台保活",
-                        onClick = onOpenLocalServerSettings,
-                    )
-                    EntryRow(
-                        icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "服务端总览",
-                        subtitle = "多 Daemon 连接状态 + 本机/云端实例统一管理",
-                        onClick = onOpenServers,
-                    )
                 }
             }
 
@@ -236,6 +238,21 @@ fun SettingsScreen(
 
             // ---- Daemon 管理 ----
             SectionTitle("Daemon 管理")
+            if (settings.daemonDecodeFailed) {
+                // 解析失败不再静默清空：原始 JSON 已备份到独立 key 并写入运行日志
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                ) {
+                    Text(
+                        text = "Daemon 配置解析失败，原始数据已备份到运行日志，请重新添加连接。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(14.dp),
+                    )
+                }
+            }
             Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
                     if (settings.daemons.isEmpty()) {

@@ -73,11 +73,12 @@ class ConnectivityViewModel(application: Application) : AndroidViewModel(applica
             wasOnline = null
             return
         }
-        // 使用保存的激活连接（与 HomeViewModel 自动连接保持同一配置来源）
+        // 使用保存的激活连接（与 HomeViewModel 自动连接保持同一配置来源）；
+        // repository.configure 内部对「配置未变化」做早退，心跳不再每 5 秒重建 OkHttpClient
         val normalized = ApiClient.normalizeDaemonUrl(daemon.baseUrl, daemon.allowHttp)
         runCatching {
             repository.configure(normalized, daemon.apiKey, daemon.allowHttp)
-        }
+        }.onFailure { AppLogger.w("Connectivity", "配置连接失败", it) }
         val online = runCatching { repository.verify().getOrThrow(); true }.getOrDefault(false)
         AppLogger.d("Connectivity", "连通性检查 ${if (online) "在线" else "离线"} $normalized")
         val previous = wasOnline

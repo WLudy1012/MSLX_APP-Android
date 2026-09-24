@@ -192,7 +192,7 @@ fun PluginsModsScreen(
 
                             if (enabledFiles.isNotEmpty() || clientFiles.isNotEmpty()) {
                                 item { GroupTitle("已启用") }
-                                items(enabledFiles) { f ->
+                                items(enabledFiles, key = { "enabled_$it" }) { f ->
                                     PmRow(
                                         fileName = f,
                                         subtitle = "已启用",
@@ -202,7 +202,7 @@ fun PluginsModsScreen(
                                         toggleLabel = "禁用",
                                     )
                                 }
-                                items(clientFiles) { f ->
+                                items(clientFiles, key = { "client_$it" }) { f ->
                                     PmRow(
                                         fileName = f,
                                         subtitle = "仅客户端",
@@ -216,7 +216,7 @@ fun PluginsModsScreen(
 
                             if (disabledFiles.isNotEmpty()) {
                                 item { GroupTitle("已禁用") }
-                                items(disabledFiles) { f ->
+                                items(disabledFiles, key = { "disabled_$it" }) { f ->
                                     PmRow(
                                         fileName = f,
                                         subtitle = "已禁用",

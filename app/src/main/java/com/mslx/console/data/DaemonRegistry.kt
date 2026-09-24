@@ -1,6 +1,5 @@
 package com.mslx.console.data
 
-import com.mslx.console.data.remote.ApiClient
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -70,11 +69,9 @@ class DaemonRegistry(
             if (daemon.id == settings.activeDaemonId) {
                 primaryRepository.configure(daemon.baseUrl, daemon.apiKey, daemon.allowHttp)
             } else {
+                // 配置变更判定已下沉到 InstanceRepository.configure（内部早退），此处直接调用
                 val repo = extraRepositories.getOrPut(daemon.id) { InstanceRepository() }
-                val normalized = ApiClient.normalizeDaemonUrl(daemon.baseUrl, daemon.allowHttp)
-                if (repo.baseUrl != normalized || repo.apiKey != daemon.apiKey.trim()) {
-                    repo.configure(daemon.baseUrl, daemon.apiKey, daemon.allowHttp)
-                }
+                repo.configure(daemon.baseUrl, daemon.apiKey, daemon.allowHttp)
             }
         }
 

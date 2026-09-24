@@ -49,7 +49,7 @@ class UserCenterViewModel(application: Application) : AndroidViewModel(applicati
             repository.userMe().fold(
                 onSuccess = { user ->
                     _state.update { it.copy(loading = false, user = user) }
-                    if (user.role.equals("admin", ignoreCase = true) || user.role.equals("system", ignoreCase = true) || user.username.equals("MSLX Manger", ignoreCase = true)) loadAdminData()
+                    if (user.role.equals("admin", ignoreCase = true) || user.isSystemUser) loadAdminData()
                 },
                 onFailure = { e ->
                     _state.update { it.copy(loading = false, error = e.message ?: "获取失败") }

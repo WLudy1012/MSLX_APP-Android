@@ -67,12 +67,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         autoConnect()
         loadQuote()
-        // 周期性刷新实例状态（负载走 SignalR 实时推送）
+        // 周期性刷新实例状态（负载走 SignalR 实时推送）；顺带自愈负载连接，
+        // 避免守护进程重启后首页负载卡片静默冻结。
         viewModelScope.launch {
             while (isActive) {
                 try {
                     if (_state.value.connected) {
                         refreshInstances()
+                        startMonitor()
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -140,12 +142,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 refreshInstances()
                 startMonitor()
             } else {
-                result.exceptionOrNull()?.let { AppLogger.w("Home", "连接失败 $normalizedUrl", it) }
+                val cause = result.exceptionOrNull()
+                cause?.let { AppLogger.w("Home", "连接失败 $normalizedUrl", it) }
+                // 与 ConnectViewModel 一致：带上 e.message，便于区分 401（鉴权失败）与网络不可达
+                val reason = cause?.message?.takeIf { it.isNotBlank() }
+                    ?: "无法连接守护进程，请检查地址、协议与 API Key"
                 _state.update {
                     it.copy(
                         connecting = false,
                         connected = false,
-                        error = "连接失败：无法连接守护进程，请检查地址、协议与 API Key",
+                        error = "连接失败：$reason",
                     )
                 }
             }
@@ -155,7 +161,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 重新连接（主页"重试"按钮）。 */
     fun retryConnect() = autoConnect()
 
-    /** 启动 SignalR 系统负载监视（/api/hubs/system，2s 推送）。 */
+    /**
+     * 启动 SignalR 系统负载监视（/api/hubs/system，2s 推送）。
+     *
+     * 已连接时直接返回；客户端存在但已断开时不重建——[SystemMonitorClient] 内部会按
+     * 退避序列自动重连，避免与自动重连竞争建立重复连接。首次连接失败则释放引用，
+     * 由 15s 轮询的下一轮重试（等效于 15s 退避）。
+     */
     private fun startMonitor() {
         if (monitorClient != null) return
         val client = repository.createSystemMonitorClient(::onSystemStats)
@@ -163,8 +175,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val ok = runCatching { client.connect() }.isSuccess
             if (!ok) {
-                // 连接失败：释放引用，允许下次重连（如 daemon 重启后用户回到主页）
-                monitorClient = null
+                // 首次连接失败：停止其内部重连并释放引用，交给下一轮轮询重建
+                if (monitorClient === client) monitorClient = null
+                runCatching { client.disconnect() }
             }
         }
     }

@@ -54,11 +54,18 @@ class InstanceRepository {
 
     val isConfigured: Boolean get() = api != null && baseUrl.isNotBlank()
 
-    /** 配置连接地址并重建 API 客户端(每次连接/切换连接时调用)。 */
+    /**
+     * 配置连接地址并重建 API 客户端(每次连接/切换连接时调用)。
+     *
+     * 配置未变化时直接早退：心跳（每 5 秒）等调用方会重复调用本方法，
+     * 无条件重建 Retrofit/OkHttpClient 会丢弃连接池与线程资源，造成周期性卡顿。
+     */
     fun configure(baseUrl: String, apiKey: String, allowHttp: Boolean = false) {
         val normalized = ApiClient.normalizeDaemonUrl(baseUrl, allowHttp)
+        val trimmedKey = apiKey.trim()
+        if (api != null && normalized == this.baseUrl && trimmedKey == this.apiKey) return
         this.baseUrl = normalized
-        this.apiKey = apiKey.trim()
+        this.apiKey = trimmedKey
         this.api = ApiClient.build(normalized, this.apiKey)
         AppLogger.i("Repository", "configure: ${normalized.trimEnd('/')} allowHttp=$allowHttp")
     }
@@ -171,6 +178,9 @@ class InstanceRepository {
      * 流式分块上传一个文件，返回可用于 createServer 的 fileKey(uploadId)。
      * 从 input 流逐块读取(每块 10MB)上传，避免 readBytes() 把整个文件读入内存；
      * 流读取在 IO 线程执行，避免阻塞主线程。
+     *
+     * 任一分片或合并失败都会调用 [deleteUpload] 清理服务端已落盘的临时分片，
+     * 避免失败重试在 Daemon 上不断堆积孤儿碎片占用磁盘。
      */
     suspend fun uploadFileStream(
         input: () -> java.io.InputStream,
@@ -178,31 +188,38 @@ class InstanceRepository {
         onProgress: (Int) -> Unit,
     ): Result<String> = runCatching {
         val uploadId = uploadInit().getOrThrow()
-        val chunkSize = 10 * 1024 * 1024
-        val buffer = ByteArray(chunkSize)
-        var index = 0
-        var uploaded = 0L
-        withContext(Dispatchers.IO) {
-            input().use { stream ->
-                while (true) {
-                    val read = stream.read(buffer)
-                    if (read < 0) break
-                    if (read == 0) continue
-                    val chunk = buffer.copyOf(read)
-                    uploadChunk(uploadId, index, chunk).getOrThrow()
-                    index++
-                    uploaded += read
-                    onProgress(((uploaded * 100) / maxOf(totalBytes, 1L)).toInt().coerceIn(0, 100))
+        try {
+            val chunkSize = 10 * 1024 * 1024
+            val buffer = ByteArray(chunkSize)
+            var index = 0
+            var uploaded = 0L
+            withContext(Dispatchers.IO) {
+                input().use { stream ->
+                    while (true) {
+                        val read = stream.read(buffer)
+                        if (read < 0) break
+                        if (read == 0) continue
+                        val chunk = buffer.copyOf(read)
+                        uploadChunk(uploadId, index, chunk).getOrThrow()
+                        index++
+                        uploaded += read
+                        onProgress(((uploaded * 100) / maxOf(totalBytes, 1L)).toInt().coerceIn(0, 100))
+                    }
                 }
             }
+            if (index == 0) {
+                // 空文件也至少传一个空块，保证 finish 时总块数 >= 1
+                uploadChunk(uploadId, 0, byteArrayOf()).getOrThrow()
+                index = 1
+            }
+            uploadFinish(uploadId, index).getOrThrow()
+            uploadId
+        } catch (e: Exception) {
+            AppLogger.w("Repository", "上传失败，清理服务端临时分片 uploadId=$uploadId", e)
+            runCatching { deleteUpload(uploadId) }
+                .onFailure { AppLogger.w("Repository", "清理服务端临时分片失败 uploadId=$uploadId", it) }
+            throw e
         }
-        if (index == 0) {
-            // 空文件也至少传一个空块，保证 finish 时总块数 >= 1
-            uploadChunk(uploadId, 0, byteArrayOf()).getOrThrow()
-            index = 1
-        }
-        uploadFinish(uploadId, index).getOrThrow()
-        uploadId
     }
 
     suspend fun serverCoreClassify(): Result<ServerCoreClassify> = runCatching {

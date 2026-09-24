@@ -9,9 +9,13 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
@@ -48,6 +52,8 @@ data class AppSettings(
     val localUseSerialGc: Boolean = true,
     /** 本机开服增强模式：Shizuku 可用时以 shell 权限 exec 真正的 java 子进程（多实例/可重启/跨版本）。 */
     val localUseShizuku: Boolean = false,
+    /** Daemon 配置解析失败（原始 JSON 已备份且已记日志），设置页据此给出提示。 */
+    val daemonDecodeFailed: Boolean = false,
 ) {
     val activeDaemon: DaemonConfig?
         get() = daemons.firstOrNull { it.id == activeDaemonId }
@@ -60,8 +66,17 @@ class SettingsStore(private val context: Context) {
     private val gson = Gson()
     private val mutex = Mutex()
 
+    /** 损坏配置的异步备份专用作用域（读写 SettingsStore 自身不持有协程作用域）。 */
+    private val backupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** 备份只需一次：进程内首次发现解析失败时触发，避免每次 DataStore 发射都重复写盘。 */
+    @Volatile
+    private var corruptBackupScheduled = false
+
     private object Keys {
         val DAEMONS = stringPreferencesKey("daemons")
+        /** 解析失败的 daemons 原始 JSON 备份（独立 key，不参与业务流程）。 */
+        val DAEMONS_BACKUP = stringPreferencesKey("daemons_backup_corrupt")
         val ACTIVE_DAEMON = stringPreferencesKey("active_daemon")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val SEED_COLOR = longPreferencesKey("seed_color")
@@ -77,8 +92,11 @@ class SettingsStore(private val context: Context) {
     }
 
     val settingsFlow: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
+        val rawDaemons = prefs[Keys.DAEMONS]
+        val decoded = rawDaemons?.let(::decodeDaemons)
+        if (decoded?.failed == true) backupCorruptDaemons(rawDaemons)
         AppSettings(
-            daemons = prefs[Keys.DAEMONS]?.let(::decodeDaemons) ?: emptyList(),
+            daemons = decoded?.daemons ?: emptyList(),
             activeDaemonId = prefs[Keys.ACTIVE_DAEMON]?.takeIf { it.isNotBlank() },
             themeMode = if (prefs[Keys.THEME_MODE] == "dynamic") ThemeMode.DYNAMIC else ThemeMode.SEED,
             seedColor = prefs[Keys.SEED_COLOR] ?: 0xFF00838F,
@@ -95,6 +113,7 @@ class SettingsStore(private val context: Context) {
             localKeepAlive = prefs[Keys.LOCAL_KEEP_ALIVE] ?: true,
             localUseSerialGc = prefs[Keys.LOCAL_USE_SERIAL_GC] ?: true,
             localUseShizuku = prefs[Keys.LOCAL_USE_SHIZUKU] ?: false,
+            daemonDecodeFailed = decoded?.failed == true,
         )
     }
 
@@ -179,11 +198,38 @@ class SettingsStore(private val context: Context) {
             },
         )
 
-    private fun decodeDaemons(json: String): List<DaemonConfig> = runCatching {
-        gson.fromJson<List<DaemonConfig>>(json, object : TypeToken<List<DaemonConfig>>() {}.type)
-            .map {
+    private data class DecodedDaemons(val daemons: List<DaemonConfig>, val failed: Boolean)
+
+    /**
+     * 解析 daemons JSON；失败标记 [DecodedDaemons.failed]（不再静默返回空列表），
+     * 由 [settingsFlow] 负责备份原始 JSON、记日志并在设置页给出提示。
+     */
+    private fun decodeDaemons(json: String): DecodedDaemons {
+        if (json.isBlank()) return DecodedDaemons(emptyList(), failed = false)
+        val parsed = runCatching {
+            gson.fromJson<List<DaemonConfig>>(json, object : TypeToken<List<DaemonConfig>>() {}.type)
+        }.getOrNull() ?: return DecodedDaemons(emptyList(), failed = true)
+        return DecodedDaemons(
+            parsed.map {
                 // 解密失败（如备份恢复后 Keystore 密钥丢失）时清空 apiKey，避免把密文当明文
                 it.copy(apiKey = CryptoManager.decrypt(it.apiKey).orEmpty())
-            }
-    }.getOrDefault(emptyList())
+            },
+            failed = false,
+        )
+    }
+
+    /** 解析失败：备份原始 JSON + 记错误日志（只执行一次），供设置页提示与后续排查。 */
+    private fun backupCorruptDaemons(rawJson: String) {
+        if (corruptBackupScheduled) return
+        corruptBackupScheduled = true
+        AppLogger.e(
+            "Settings",
+            "Daemon 配置解析失败：原始数据（${rawJson.length} 字符）已备份到 ${Keys.DAEMONS_BACKUP.name}，请在设置页重新添加连接",
+        )
+        backupScope.launch {
+            runCatching {
+                context.settingsDataStore.edit { prefs -> prefs[Keys.DAEMONS_BACKUP] = rawJson }
+            }.onFailure { AppLogger.w("Settings", "备份损坏的 Daemon 配置失败", it) }
+        }
+    }
 }

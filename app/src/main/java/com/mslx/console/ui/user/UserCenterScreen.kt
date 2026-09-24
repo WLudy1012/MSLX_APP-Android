@@ -112,7 +112,7 @@ fun UserCenterScreen(
             )
             else -> {
                 val user = state.user!!
-                val isSystemUser = user.username.equals("MSLX Manger", ignoreCase = true) || user.role.equals("system", ignoreCase = true)
+                val isSystemUser = user.isSystemUser
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(innerPadding),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -286,7 +286,7 @@ private fun ProfileCard(user: UserInfo, onEdit: () -> Unit, canEdit: Boolean) {
             }
             Text(user.name ?: user.username ?: "未知用户", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("@${user.username ?: "unknown"}", color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = .7f))
-            Text("角色：${if (user.username.equals("MSLX Manger", ignoreCase = true) || user.role.equals("system", ignoreCase = true)) "System" else user.role ?: "user"}", color = MaterialTheme.colorScheme.primary)
+            Text("角色：${if (user.isSystemUser) "System" else user.role ?: "user"}", color = MaterialTheme.colorScheme.primary)
             if (canEdit) {
                 TextButton(onClick = onEdit) {
                     Icon(Icons.Filled.Edit, contentDescription = null)
@@ -303,7 +303,7 @@ private fun ManagedUserCard(user: UserInfo, currentUserId: String?, onEdit: () -
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(user.name ?: user.username ?: "未知用户", fontWeight = FontWeight.SemiBold)
-                val roleLabel = if (user.username.equals("MSLX Manger", ignoreCase = true) || user.role.equals("system", ignoreCase = true)) "System" else user.role ?: "user"
+                val roleLabel = if (user.isSystemUser) "System" else user.role ?: "user"
                 Text("@${user.username ?: "unknown"} · $roleLabel", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("资源：${user.resources.orEmpty().size}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
