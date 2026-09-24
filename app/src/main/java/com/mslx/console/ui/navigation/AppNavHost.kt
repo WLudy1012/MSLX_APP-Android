@@ -23,6 +23,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.mslx.console.data.AppSettings
+import com.mslx.console.data.ServerRef
 import com.mslx.console.ui.MainBottomNav
 import com.mslx.console.ui.TopPage
 import com.mslx.console.ui.connect.ConnectScreen
@@ -35,6 +36,7 @@ import com.mslx.console.ui.home.HomeScreen
 import com.mslx.console.ui.instances.InstancesScreen
 import com.mslx.console.ui.settings.InstanceSettingsScreen
 import com.mslx.console.ui.settings.FileManagerScreen
+import com.mslx.console.ui.settings.LocalInstancePendingScreen
 import com.mslx.console.ui.settings.LocalInstanceSettingsScreen
 import com.mslx.console.ui.settings.PluginsModsScreen
 import com.mslx.console.ui.settings.ServerPropertiesScreen
@@ -56,30 +58,46 @@ object Routes {
     const val INSTANCES = "instances"
     const val SETTINGS = "settings"
     const val NEW_INSTANCE = "newInstance"
-    const val CONSOLE = "console/{instanceId}"
-    const val INSTANCE_SETTINGS = "instanceSettings/{instanceId}"
-    const val FILE_MANAGER = "fileManager/{instanceId}"
-    const val PLUGINS_MODS = "pluginsMods/{instanceId}"
-    const val SERVER_PROPS = "serverProps/{instanceId}"
+
+    // 二级页统一携带 daemonId：实例归属哪台服务端就操作哪台（去主连接）。
+    // 本机实例复用同一套路由：daemonId = local、instanceId = 实例目录名。
+    const val CONSOLE = "console/{daemonId}/{instanceId}"
+    const val INSTANCE_SETTINGS = "instanceSettings/{daemonId}/{instanceId}"
+    const val FILE_MANAGER = "fileManager/{daemonId}/{instanceId}"
+    const val PLUGINS_MODS = "pluginsMods/{daemonId}/{instanceId}"
+    const val SERVER_PROPS = "serverProps/{daemonId}/{instanceId}"
     const val USER_CENTER = "userCenter"
     const val APPEARANCE = "appearance"
     const val ABOUT = "about"
     const val LOGS = "logs"
-    const val LOCAL_CONSOLE = "console/local/{dir}"
-    const val LOCAL_INSTANCE_SETTINGS = "instanceSettings/local/{dir}"
     const val LOCAL_SERVER_SETTINGS = "localServerSettings"
     const val SERVERS = "servers"
 
-    fun console(instanceId: Long): String = "console/$instanceId"
-    fun localConsole(dir: String): String = "console/local/${android.net.Uri.encode(dir)}"
-    fun localInstanceSettings(dir: String): String = "instanceSettings/local/${android.net.Uri.encode(dir)}"
+    fun console(ref: ServerRef): String = ref.routePath("console")
+    fun instanceSettings(ref: ServerRef): String = ref.routePath("instanceSettings")
+    fun fileManager(ref: ServerRef): String = ref.routePath("fileManager")
+    fun pluginsMods(ref: ServerRef): String = ref.routePath("pluginsMods")
+    fun serverProps(ref: ServerRef): String = ref.routePath("serverProps")
+
+    /** 本机实例的语义化入口（等价于 console(ServerRef.local(dir))）。 */
+    fun localConsole(dir: String): String = console(ServerRef.local(dir))
+    fun localInstanceSettings(dir: String): String = instanceSettings(ServerRef.local(dir))
+
     fun connect(auto: Boolean, daemonId: String? = null): String =
         "connect?auto=$auto&daemonId=${daemonId.orEmpty()}"
-    fun instanceSettings(instanceId: Long): String = "instanceSettings/$instanceId"
-    fun fileManager(instanceId: Long): String = "fileManager/$instanceId"
-    fun pluginsMods(instanceId: Long): String = "pluginsMods/$instanceId"
-    fun serverProps(instanceId: Long): String = "serverProps/$instanceId"
 }
+
+/** 二级页公共路径参数（instanceId 为 String：远程是数值 id，本机是目录名）。 */
+private val REF_ARGUMENTS = listOf(
+    navArgument("daemonId") { type = NavType.StringType },
+    navArgument("instanceId") { type = NavType.StringType },
+)
+
+/** 从返回栈条目解析实例定位符。 */
+private fun androidx.navigation.NavBackStackEntry.serverRef(): ServerRef = ServerRef(
+    daemonId = arguments?.getString("daemonId").orEmpty(),
+    instanceId = arguments?.getString("instanceId").orEmpty(),
+)
 
 @Composable
 fun AppNavHost(
@@ -214,11 +232,8 @@ fun AppNavHost(
                     onOpenNewInstance = {
                         navigateTopLevel(Routes.NEW_INSTANCE)
                     },
-                    onOpenInstance = { id ->
-                        navController.navigate(Routes.console(id)) { launchSingleTop = true }
-                    },
-                    onOpenLocalInstance = { dir ->
-                        navController.navigate(Routes.localConsole(dir)) { launchSingleTop = true }
+                    onOpenServer = { ref ->
+                        navController.navigate(Routes.console(ref)) { launchSingleTop = true }
                     },
                 )
             }
@@ -228,11 +243,8 @@ fun AppNavHost(
                     onOpenHome = { navigateTopLevel(Routes.HOME) },
                     onOpenInstances = { navigateTopLevel(Routes.INSTANCES) },
                     onOpenSettings = { navigateTopLevel(Routes.SETTINGS) },
-                    onOpenConsole = { id ->
-                        navController.navigate(Routes.console(id)) { launchSingleTop = true }
-                    },
-                    onOpenLocalConsole = { dir ->
-                        navController.navigate(Routes.localConsole(dir)) { launchSingleTop = true }
+                    onOpenServer = { ref ->
+                        navController.navigate(Routes.console(ref)) { launchSingleTop = true }
                     },
                 )
             }
@@ -266,46 +278,12 @@ fun AppNavHost(
                 )
             }
 
-            // 本机实例统一控制台（目录名为 key，绑定 LocalServerRuntime）
-            composable(
-                route = Routes.LOCAL_CONSOLE,
-                arguments = listOf(navArgument("dir") { type = NavType.StringType }),
-            ) { entry ->
-                val dir = entry.arguments?.getString("dir").orEmpty()
-                val consoleVm: LocalConsoleViewModel = viewModel(
-                    key = "localconsole_$dir",
-                    factory = viewModelFactory {
-                        initializer {
-                            val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
-                            LocalConsoleViewModel(app, dir)
-                        }
-                    },
-                )
-                ConsoleScreen(
-                    controller = consoleVm,
-                    onBack = { navController.popBackStack() },
-                    onOpenSettings = {
-                        navController.navigate(Routes.localInstanceSettings(dir)) { launchSingleTop = true }
-                    },
-                )
-            }
-
             // 服务端总览：多 Daemon 状态 + 本机/各 Daemon 实例统一列表
             composable(Routes.SERVERS) {
                 ServersOverviewScreen(
                     onBack = { navController.popBackStack() },
-                    onOpenLocalServer = { dir ->
-                        if (dir.isBlank()) {
-                            // "新建"是底部 tab：必须走 navigateTopLevel 清栈，
-                            // 否则会把 NEW_INSTANCE 压在 SETTINGS 之上，污染返回栈
-                            // 导致之后点"设置"tab 命中 saveState/restoreState 冲突而失效。
-                            navigateTopLevel(Routes.NEW_INSTANCE)
-                        } else {
-                            navController.navigate(Routes.localConsole(dir)) { launchSingleTop = true }
-                        }
-                    },
-                    onOpenConsole = { instanceId ->
-                        navController.navigate(Routes.console(instanceId)) { launchSingleTop = true }
+                    onOpenServer = { ref ->
+                        navController.navigate(Routes.console(ref)) { launchSingleTop = true }
                     },
                     onOpenCreate = {
                         navigateTopLevel(Routes.NEW_INSTANCE)
@@ -315,18 +293,6 @@ fun AppNavHost(
 
             composable(Routes.LOCAL_SERVER_SETTINGS) {
                 LocalServerSettingsScreen(onBack = { navController.popBackStack() })
-            }
-
-            // 本机实例设置（直接编辑 instance.json + server.properties）
-            composable(
-                route = Routes.LOCAL_INSTANCE_SETTINGS,
-                arguments = listOf(navArgument("dir") { type = NavType.StringType }),
-            ) { entry ->
-                val dir = entry.arguments?.getString("dir").orEmpty()
-                LocalInstanceSettingsScreen(
-                    dirName = dir,
-                    onBack = { navController.popBackStack() },
-                )
             }
 
             composable(Routes.APPEARANCE) {
@@ -345,82 +311,115 @@ fun AppNavHost(
                 UserCenterScreen(onBack = { navController.popBackStack() })
             }
 
+            // 统一控制台：本机实例与远程实例同一套界面，仅控制器实现不同
             composable(
                 route = Routes.CONSOLE,
-                arguments = listOf(navArgument("instanceId") { type = NavType.LongType }),
+                arguments = REF_ARGUMENTS,
             ) { backStackEntry ->
-                val instanceId = backStackEntry.arguments?.getLong("instanceId") ?: 0L
-                val consoleVm: ConsoleViewModel = viewModel(
-                    key = "console_$instanceId",
-                    factory = viewModelFactory {
-                        initializer {
-                            val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
-                            ConsoleViewModel(app, instanceId)
-                        }
-                    },
-                )
+                val ref = backStackEntry.serverRef()
+                val controller: com.mslx.console.ui.console.ConsoleController = if (ref.isLocal) {
+                    viewModel(
+                        key = "localconsole_${ref.instanceId}",
+                        factory = viewModelFactory {
+                            initializer {
+                                val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
+                                LocalConsoleViewModel(app, ref.instanceId)
+                            }
+                        },
+                    )
+                } else {
+                    viewModel(
+                        key = "console_${ref.catalogKey}",
+                        factory = viewModelFactory {
+                            initializer {
+                                val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
+                                ConsoleViewModel(app, ref)
+                            }
+                        },
+                    )
+                }
                 ConsoleScreen(
-                    controller = consoleVm,
+                    controller = controller,
                     onBack = { navController.popBackStack() },
                     onOpenSettings = {
-                        navController.navigate(Routes.instanceSettings(instanceId)) {
+                        navController.navigate(Routes.instanceSettings(ref)) {
                             launchSingleTop = true
                         }
                     },
                 )
             }
 
+            // 实例设置：本机走私有目录直编页，远程走 Daemon API 页
             composable(
                 route = Routes.INSTANCE_SETTINGS,
-                arguments = listOf(navArgument("instanceId") { type = NavType.LongType }),
+                arguments = REF_ARGUMENTS,
             ) { backStackEntry ->
-                val instanceId = backStackEntry.arguments?.getLong("instanceId") ?: 0L
-                InstanceSettingsScreen(
-                    instanceId = instanceId,
-                    onBack = { navController.popBackStack() },
-                    onOpenPluginsMods = {
-                        navController.navigate(Routes.pluginsMods(instanceId)) { launchSingleTop = true }
-                    },
-                    onOpenServerProps = {
-                        navController.navigate(Routes.serverProps(instanceId)) { launchSingleTop = true }
-                    },
-                    onOpenFileManager = {
-                        navController.navigate(Routes.fileManager(instanceId)) { launchSingleTop = true }
-                    },
-                )
+                val ref = backStackEntry.serverRef()
+                if (ref.isLocal) {
+                    LocalInstanceSettingsScreen(
+                        dirName = ref.instanceId,
+                        onBack = { navController.popBackStack() },
+                    )
+                } else {
+                    InstanceSettingsScreen(
+                        ref = ref,
+                        onBack = { navController.popBackStack() },
+                        onOpenPluginsMods = {
+                            navController.navigate(Routes.pluginsMods(ref)) { launchSingleTop = true }
+                        },
+                        onOpenServerProps = {
+                            navController.navigate(Routes.serverProps(ref)) { launchSingleTop = true }
+                        },
+                        onOpenFileManager = {
+                            navController.navigate(Routes.fileManager(ref)) { launchSingleTop = true }
+                        },
+                    )
+                }
             }
 
             composable(
                 route = Routes.FILE_MANAGER,
-                arguments = listOf(navArgument("instanceId") { type = NavType.LongType }),
+                arguments = REF_ARGUMENTS,
             ) { backStackEntry ->
-                val instanceId = backStackEntry.arguments?.getLong("instanceId") ?: 0L
-                FileManagerScreen(
-                    instanceId = instanceId,
-                    onBack = { navController.popBackStack() },
-                )
+                val ref = backStackEntry.serverRef()
+                if (ref.isLocal) {
+                    LocalInstancePendingScreen(onBack = { navController.popBackStack() })
+                } else {
+                    FileManagerScreen(
+                        ref = ref,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             composable(
                 route = Routes.PLUGINS_MODS,
-                arguments = listOf(navArgument("instanceId") { type = NavType.LongType }),
+                arguments = REF_ARGUMENTS,
             ) { backStackEntry ->
-                val instanceId = backStackEntry.arguments?.getLong("instanceId") ?: 0L
-                PluginsModsScreen(
-                    instanceId = instanceId,
-                    onBack = { navController.popBackStack() },
-                )
+                val ref = backStackEntry.serverRef()
+                if (ref.isLocal) {
+                    LocalInstancePendingScreen(onBack = { navController.popBackStack() })
+                } else {
+                    PluginsModsScreen(
+                        ref = ref,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             composable(
                 route = Routes.SERVER_PROPS,
-                arguments = listOf(navArgument("instanceId") { type = NavType.LongType }),
+                arguments = REF_ARGUMENTS,
             ) { backStackEntry ->
-                val instanceId = backStackEntry.arguments?.getLong("instanceId") ?: 0L
-                ServerPropertiesScreen(
-                    instanceId = instanceId,
-                    onBack = { navController.popBackStack() },
-                )
+                val ref = backStackEntry.serverRef()
+                if (ref.isLocal) {
+                    LocalInstancePendingScreen(onBack = { navController.popBackStack() })
+                } else {
+                    ServerPropertiesScreen(
+                        ref = ref,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
         }
 

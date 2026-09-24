@@ -62,20 +62,20 @@ class ServersOverviewViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    /** 把某台 Daemon 设为主连接（既有页面随后都指向它）。 */
-    fun setPrimary(daemonId: String) {
+    /** 设某台 Daemon 为默认：仅影响新建实例的默认落点与主页首屏页码，各服务端地位对等。 */
+    fun setDefault(daemonId: String) {
         viewModelScope.launch {
             runCatching { store.setActiveDaemon(daemonId) }
                 .onSuccess {
                     val settings = runCatching { store.settingsFlow.first() }.getOrDefault(AppSettings())
                     registry.sync(settings)
                     val name = settings.daemons.firstOrNull { it.id == daemonId }?.name.orEmpty()
-                    AppLogger.i("Servers", "已切换主 Daemon：$name")
-                    _state.update { it.copy(message = "已把「${name.ifBlank { daemonId }}」设为主连接") }
+                    AppLogger.i("Servers", "已切换默认服务端：$name")
+                    _state.update { it.copy(message = "已把「${name.ifBlank { daemonId }}」设为默认服务端") }
                     refresh()
                 }
                 .onFailure { e ->
-                    AppLogger.w("Servers", "切换主 Daemon 失败", e)
+                    AppLogger.w("Servers", "切换默认服务端失败", e)
                     _state.update { it.copy(message = "切换失败：${e.message}") }
                 }
         }

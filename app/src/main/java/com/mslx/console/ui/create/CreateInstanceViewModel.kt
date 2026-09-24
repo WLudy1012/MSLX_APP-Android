@@ -8,6 +8,9 @@ import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppLogger
 import com.mslx.console.data.AppSettings
+import com.mslx.console.data.DaemonOption
+import com.mslx.console.data.InstanceRepository
+import com.mslx.console.data.ensureRepository
 import com.mslx.console.data.localengine.LocalCoreInstaller
 import com.mslx.console.data.localengine.LocalInstanceMeta
 import com.mslx.console.data.localengine.LocalJreManager
@@ -100,6 +103,11 @@ fun wizardSteps(mode: Int): List<WizardStep> = when (mode) {
 data class CreateInstanceUiState(
     // 创建目标: "daemon" 远程守护进程 / "local" 本机（进程内 JVM / Shizuku）
     val target: String = "daemon",
+    // —— 远程目标专用：实例落到哪台 Daemon（去主连接，不再隐含「当前主连接」）——
+    /** 已配置的 Daemon 列表。 */
+    val availableDaemons: List<DaemonOption> = emptyList(),
+    /** 当前选中的目标 Daemon（初值为「默认 Daemon」）。 */
+    val selectedDaemonId: String = "",
     // 模式: 1 快速 / 2 整合包 / 3 基岩版 / 4 MCDR / 10 自定义
     val mode: Int = 1,
     val step: Int = 0,
@@ -176,9 +184,13 @@ data class CreateInstanceUiState(
 class CreateInstanceViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = getApplication<MSLXApplication>().container
-    private val repository = container.instanceRepository
     private val settingsStore = container.settingsStore
-    private val coreInstaller = LocalCoreInstaller(repository)
+
+    /**
+     * 目标 Daemon 的仓储：随 [CreateInstanceUiState.selectedDaemonId] 切换（未选中时为
+     * 未配置仓储，调用只会得到「尚未配置连接信息」而不会崩溃）。
+     */
+    private var repository: InstanceRepository = InstanceRepository()
 
     private val _state = MutableStateFlow(CreateInstanceUiState())
     val state = _state.asStateFlow()
@@ -189,10 +201,50 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     private var creationClient: CreationProgressClient? = null
 
     init {
-        loadJavaOptions()
-        loadCoreCategories()
+        loadDaemons()
         loadLocalRuntimes()
         loadLocalDefaults()
+    }
+
+    /** 读取已配置 Daemon 列表，默认选中「默认 Daemon」并以它加载 Java / 核心分类。 */
+    private fun loadDaemons() {
+        viewModelScope.launch {
+            val settings = runCatching { settingsStore.settingsFlow.first() }.getOrNull()
+            val daemons = settings?.daemons.orEmpty()
+            val initial = settings?.activeDaemonId?.takeIf { id -> daemons.any { it.id == id } }
+                ?: daemons.firstOrNull()?.id
+                ?: ""
+            _state.update { it.copy(availableDaemons = daemons.map { d -> DaemonOption(d.id, d.name) }) }
+            bindDaemon(initial)
+        }
+    }
+
+    /** 切换目标 Daemon：重新解析仓储并重取该 Daemon 的 Java 选项与核心分类。 */
+    private fun bindDaemon(daemonId: String) {
+        viewModelScope.launch {
+            repository = container.ensureRepository(daemonId) ?: InstanceRepository()
+            _state.update { it.copy(selectedDaemonId = daemonId) }
+            loadJavaOptions()
+            loadCoreCategories()
+        }
+    }
+
+    /** 界面上选择目标 Daemon。 */
+    fun setDaemon(daemonId: String) {
+        if (_state.value.selectedDaemonId == daemonId) return
+        // 上传得到的文件 key / 核心下载信息都属于旧 Daemon，切 Daemon 后一律清空
+        _state.update {
+            it.copy(
+                core = "",
+                coreUrl = "",
+                coreSha256 = "",
+                coreFileKey = "",
+                packageFileKey = "",
+                uploadedFileName = "",
+                onlineGameVersion = "",
+            )
+        }
+        bindDaemon(daemonId)
     }
 
     fun update(transform: (CreateInstanceUiState) -> CreateInstanceUiState) {
@@ -736,7 +788,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
             )
         }
         viewModelScope.launch {
-            coreInstaller.installFromUrl(
+            LocalCoreInstaller(repository).installFromUrl(
                 url = s.coreUrl,
                 sha256 = s.coreSha256,
                 core = coreName,
@@ -830,6 +882,9 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
             localJavas = _state.value.localJavas,
             coreCategories = _state.value.coreCategories,
             localRuntimes = _state.value.localRuntimes,
+            // 目标 Daemon 与已加载列表跨表单复用，避免重置后回到未选中状态
+            availableDaemons = _state.value.availableDaemons,
+            selectedDaemonId = _state.value.selectedDaemonId,
         )
     }
 

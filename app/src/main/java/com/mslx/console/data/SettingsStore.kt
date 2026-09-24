@@ -140,7 +140,11 @@ class SettingsStore(private val context: Context) {
         }
     }
 
-    /** 新增或更新一个 Daemon 并设为当前激活项。 */
+    /**
+     * 新增或更新一个 Daemon。
+     * 去主连接：只在尚无默认项（首次添加、或默认项已被删）时把该 Daemon 补为默认，
+     * 编辑已有 Daemon 不会抢走默认位。
+     */
     suspend fun upsertDaemon(config: DaemonConfig) = update { s ->
         val exists = s.daemons.any { it.id == config.id }
         val daemons = if (exists) {
@@ -148,7 +152,8 @@ class SettingsStore(private val context: Context) {
         } else {
             s.daemons + config
         }
-        s.copy(daemons = daemons, activeDaemonId = config.id)
+        val active = s.activeDaemonId?.takeIf { id -> daemons.any { it.id == id } } ?: config.id
+        s.copy(daemons = daemons, activeDaemonId = active)
     }
 
     suspend fun removeDaemon(id: String) = update { s ->

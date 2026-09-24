@@ -12,7 +12,7 @@ import com.mslx.console.R
 
 /**
  * 服务器启停状态的原生通知。
- * 点击通知打开应用并跳转到对应实例控制台（通过 MainActivity 的 EXTRA_INSTANCE_ID）。
+ * 点击通知打开应用并跳转到对应实例控制台（通过 MainActivity 的 EXTRA_DAEMON_ID + EXTRA_INSTANCE_ID）。
  */
 object ServerNotificationHelper {
 
@@ -21,6 +21,11 @@ object ServerNotificationHelper {
     private const val NOTIFICATION_ID_PREFIX = 1000
 
     const val EXTRA_INSTANCE_ID = "extra_instance_id"
+    const val EXTRA_DAEMON_ID = "extra_daemon_id"
+
+    /** 多 Daemon 下 instanceId 可能重复，用 daemonId 高位偏移避开碰撞。 */
+    private fun notificationId(daemonId: String, instanceId: Long): Int =
+        NOTIFICATION_ID_PREFIX + instanceId.toInt() + (daemonId.hashCode().and(0xFF) shl 20)
 
     /** 确保通知渠道存在（需在发通知前调用）。 */
     fun ensureChannel(context: Context) {
@@ -39,6 +44,7 @@ object ServerNotificationHelper {
     /** 发送一条实例开服/关服通知。 */
     fun notifyServerStatus(
         context: Context,
+        daemonId: String,
         instanceId: Long,
         instanceName: String,
         isOpened: Boolean,
@@ -48,11 +54,12 @@ object ServerNotificationHelper {
 
         val contentIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_DAEMON_ID, daemonId)
             putExtra(EXTRA_INSTANCE_ID, instanceId)
         }
         val pending = PendingIntent.getActivity(
             context,
-            instanceId.toInt(),
+            notificationId(daemonId, instanceId),
             contentIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -71,7 +78,7 @@ object ServerNotificationHelper {
             .build()
 
         try {
-            manager.notify(NOTIFICATION_ID_PREFIX + instanceId.toInt(), notification)
+            manager.notify(notificationId(daemonId, instanceId), notification)
         } catch (_: SecurityException) {
             // 用户未授予通知权限，静默忽略
         }

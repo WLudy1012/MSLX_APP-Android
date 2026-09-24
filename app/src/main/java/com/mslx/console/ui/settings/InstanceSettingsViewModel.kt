@@ -4,6 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
+import com.mslx.console.data.InstanceRepository
+import com.mslx.console.data.ServerRef
+import com.mslx.console.data.ensureRepository
 import com.mslx.console.data.model.LocalJava
 import com.mslx.console.data.model.ServerSettings
 import com.mslx.console.data.remote.UpdateProgressClient
@@ -28,10 +31,21 @@ data class InstanceSettingsUiState(
 
 class InstanceSettingsViewModel(
     application: Application,
-    private val instanceId: Long,
+    /** 目标实例：[ServerRef.daemonId] 决定操作哪台服务端（去主连接）。 */
+    private val ref: ServerRef,
 ) : AndroidViewModel(application) {
 
-    private val repository = getApplication<MSLXApplication>().container.instanceRepository
+    private val container = getApplication<MSLXApplication>().container
+
+    /**
+     * 目标 Daemon 的连接：首次访问发生在 init 里的 ensureRepository 之后；
+     * 服务端已被删除时退化为未配置仓储（返回错误而不是崩溃）。
+     * Java 选项、更新进度也均按此连接获取，不再固定取「当前主连接」。
+     */
+    private var repository: InstanceRepository =
+        container.repositoryFor(ref.daemonId) ?: InstanceRepository()
+
+    private val instanceId: Long get() = ref.remoteIdOrNull ?: -1L
 
     private val _state = MutableStateFlow(InstanceSettingsUiState())
     val state = _state.asStateFlow()
@@ -42,7 +56,11 @@ class InstanceSettingsViewModel(
     private var updateClient: UpdateProgressClient? = null
 
     init {
-        load()
+        viewModelScope.launch {
+            // 进程重建后直接恢复本页时，连接表可能尚未同步：先补齐再加载
+            container.ensureRepository(ref.daemonId)?.let { repository = it }
+            load()
+        }
     }
 
     fun load() {

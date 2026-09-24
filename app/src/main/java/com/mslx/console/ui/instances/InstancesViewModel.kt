@@ -7,6 +7,7 @@ import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppLogger
 import com.mslx.console.data.AppSettings
 import com.mslx.console.data.ManagedServer
+import com.mslx.console.data.ensureRepository
 import com.mslx.console.data.localengine.LocalInstanceStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,15 +25,14 @@ data class InstancesUiState(
 )
 
 /**
- * 统一实例列表：本机开服实例 + 当前主连接 Daemon 的实例（经 [com.mslx.console.data.ServerCatalog] 聚合）。
- * 点击本机条目进统一控制台（按目录名），点击 Daemon 条目进控制台（按 id）。
+ * 统一实例列表：本机开服实例 + **所有** Daemon 的实例（经 [com.mslx.console.data.ServerCatalog] 聚合）。
+ * 条目一律用 [com.mslx.console.data.ServerRef] 定位：删哪个服务端的实例就操作哪台的仓储。
  */
 class InstancesViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = getApplication<MSLXApplication>().container
     private val catalog = container.serverCatalog
     private val store = container.settingsStore
-    private val repository = container.instanceRepository
 
     private val _state = MutableStateFlow(InstancesUiState())
     val state = _state.asStateFlow()
@@ -62,9 +62,15 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
                     },
                 )
             } else {
+                val ref = server.ref
                 val id = server.remoteId
-                if (id == null) {
-                    _state.update { it.copy(deleting = false, deleteError = "无法确定远端实例 id") }
+                if (ref == null || id == null) {
+                    _state.update { it.copy(deleting = false, deleteError = "无法确定实例归属的服务端") }
+                    return@launch
+                }
+                val repository = container.ensureRepository(ref.daemonId)
+                if (repository == null) {
+                    _state.update { it.copy(deleting = false, deleteError = "该实例所属服务端已不存在，请先检查连接配置") }
                     return@launch
                 }
                 repository.deleteInstance(id, deleteFiles).fold(

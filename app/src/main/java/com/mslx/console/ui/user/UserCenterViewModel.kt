@@ -4,6 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
+import com.mslx.console.data.DaemonOption
+import com.mslx.console.data.InstanceRepository
+import com.mslx.console.data.ensureRepository
 import com.mslx.console.data.model.AdminCreateUserRequest
 import com.mslx.console.data.model.AdminUpdateUserRequest
 import com.mslx.console.data.model.UserInfo
@@ -12,6 +15,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -27,11 +31,18 @@ data class UserCenterUiState(
     val users: List<UserInfo> = emptyList(),
     val resources: List<ResourceOption> = emptyList(),
     val saving: Boolean = false,
+    /** 已配置的服务端（账号体系每台 Daemon 独立，需先选定一台）。 */
+    val daemons: List<DaemonOption> = emptyList(),
+    /** 当前查看账号信息的服务端。 */
+    val selectedDaemonId: String = "",
 )
 
 class UserCenterViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = getApplication<MSLXApplication>().container.instanceRepository
+    private val container = getApplication<MSLXApplication>().container
+
+    /** 当前选中 Daemon 的仓储（未命中时为未配置仓储，调用只会得到错误提示而不崩）。 */
+    private var repository: InstanceRepository = InstanceRepository()
 
     private val _state = MutableStateFlow(UserCenterUiState())
     val state = _state.asStateFlow()
@@ -46,6 +57,11 @@ class UserCenterViewModel(application: Application) : AndroidViewModel(applicati
     fun load() {
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
+            ensureSelection()
+            if (_state.value.selectedDaemonId.isBlank()) {
+                _state.update { it.copy(loading = false, error = "尚未配置服务端，请先到设置页添加连接") }
+                return@launch
+            }
             repository.userMe().fold(
                 onSuccess = { user ->
                     _state.update { it.copy(loading = false, user = user) }
@@ -56,6 +72,33 @@ class UserCenterViewModel(application: Application) : AndroidViewModel(applicati
                 },
             )
         }
+    }
+
+    /** 首次进入：默认看「默认 Daemon」的账号体系（无默认则取第一台）。 */
+    private suspend fun ensureSelection() {
+        if (_state.value.selectedDaemonId.isNotBlank()) {
+            repository = container.ensureRepository(_state.value.selectedDaemonId) ?: InstanceRepository()
+            return
+        }
+        val settings = runCatching { container.settingsStore.settingsFlow.first() }.getOrNull()
+        val daemons = settings?.daemons.orEmpty()
+        val selected = settings?.activeDaemonId?.takeIf { id -> daemons.any { it.id == id } }
+            ?: daemons.firstOrNull()?.id
+            ?: ""
+        repository = container.ensureRepository(selected) ?: InstanceRepository()
+        _state.update {
+            it.copy(
+                daemons = daemons.map { d -> DaemonOption(d.id, d.name) },
+                selectedDaemonId = selected,
+            )
+        }
+    }
+
+    /** 切换要查看/管理的服务端：账号与资源列表都属于那台 Daemon。 */
+    fun selectDaemon(daemonId: String) {
+        if (_state.value.selectedDaemonId == daemonId) return
+        _state.update { it.copy(selectedDaemonId = daemonId, user = null, users = emptyList(), resources = emptyList()) }
+        load()
     }
 
     fun updateSelf(

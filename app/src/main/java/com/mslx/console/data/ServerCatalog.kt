@@ -28,6 +28,9 @@ data class ManagedServer(
 ) {
     val isLocal: Boolean get() = source is ServerSource.Local
 
+    /** 统一寻址：由 [key] 反解，供路由参数与仓储分派使用（去主连接后的唯一定位方式）。 */
+    val ref: ServerRef? get() = ServerRef.fromCatalogKey(key)
+
     val sourceLabel: String
         get() = when (val s = source) {
             is ServerSource.Local -> "本机"
@@ -58,7 +61,7 @@ class ServerCatalog(
         val activeName = LocalServerRuntime.currentServerName
         return LocalInstanceStore.list(context).map { summary ->
             ManagedServer(
-                key = "local:${summary.dirName}",
+                key = ServerRef.local(summary.dirName).catalogKey,
                 name = summary.name,
                 source = ServerSource.Local,
                 detail = summary.subtitle,
@@ -73,7 +76,7 @@ class ServerCatalog(
         val instances = repository.listInstances().getOrElse { return emptyList() }
         return instances.map { instance ->
             ManagedServer(
-                key = "daemon:${daemon.id}:${instance.id}",
+                key = ServerRef.remote(daemon.id, instance.id).catalogKey,
                 name = instance.name?.takeIf { it.isNotBlank() } ?: "实例 ${instance.id}",
                 source = ServerSource.Daemon(daemon.id, daemon.name),
                 detail = listOfNotNull(

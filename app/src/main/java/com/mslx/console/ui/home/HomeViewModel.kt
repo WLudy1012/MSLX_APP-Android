@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppLogger
+import com.mslx.console.data.InstanceRepository
+import com.mslx.console.data.ensureRepository
 import com.mslx.console.data.model.InstanceSummary
 import com.mslx.console.data.model.NodeStatsPayload
 import com.mslx.console.data.model.SystemInfo
@@ -24,6 +26,7 @@ import kotlinx.coroutines.withContext
 
 /** 开服/关服通知条目。 */
 data class ServerNotification(
+    val daemonId: String,
     val id: Long,
     val instanceName: String,
     val isOpened: Boolean, // true=开服(变为运行中), false=关服(离开运行中)
@@ -34,6 +37,8 @@ data class HomeUiState(
     // 连接
     val connecting: Boolean = true,
     val connected: Boolean = false,
+    /** 主页首屏对应的 Daemon（去主连接：显式记录 daemonId，供路由与通知回跳）。 */
+    val daemonId: String = "",
     val daemonName: String = "",
     val baseUrl: String = "",
     val protocol: String = "",
@@ -53,8 +58,13 @@ data class HomeUiState(
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = getApplication<MSLXApplication>().container
-    private val repository = container.instanceRepository
     private val store = container.settingsStore
+
+    /**
+     * 主页首屏对应的仓储（= 默认 Daemon，activeDaemonId）。
+     * 去主连接：不再存在全局共享的“当前连接”，本页只认自己解析出的那台 Daemon。
+     */
+    private var repository: InstanceRepository = InstanceRepository()
 
     private val _state = MutableStateFlow(HomeUiState())
     val state = _state.asStateFlow()
@@ -104,13 +114,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 自动连接已保存的激活 Daemon；没有配置则直接进入未连接状态。 */
+    /** 自动连接默认 Daemon（仅作为主页首屏落点，不影响其它 Daemon 的连接）；没有配置则直接进入未连接状态。 */
     fun autoConnect() {
         viewModelScope.launch {
             val settings = runCatching { store.settingsFlow.first() }
                 .onFailure { AppLogger.w("Home", "读取设置失败", it) }
                 .getOrNull()
-            val daemon = settings?.activeDaemon
+            val daemon = settings?.activeDaemon ?: settings?.daemons?.firstOrNull()
             if (daemon == null) {
                 _state.update { it.copy(connecting = false, connected = false) }
                 return@launch
@@ -118,21 +128,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     connecting = true,
+                    daemonId = daemon.id,
                     daemonName = daemon.name.ifBlank { daemon.baseUrl },
                     baseUrl = daemon.baseUrl,
                     protocol = protocolLabel(daemon.baseUrl),
                 )
             }
-            // 地址归一化：默认强制 HTTPS；该 Daemon 勾选"允许 HTTP"时保留明文地址
-            val normalizedUrl = ApiClient.normalizeDaemonUrl(daemon.baseUrl, daemon.allowHttp)
+            // 仓储由注册表按 daemonId 提供（configure 内部完成地址归一化：默认强制 HTTPS）
             val result = runCatching {
-                repository.configure(normalizedUrl, daemon.apiKey, daemon.allowHttp)
-                repository.verify()
+                repository = container.ensureRepository(daemon.id) ?: InstanceRepository()
+                repository.verify().getOrThrow()
             }
             val connected = result.isSuccess
             if (connected) {
                 // 若地址被规范化（如 http 升级 https），同步回写存储，避免下次仍用旧地址
-                if (normalizedUrl != daemon.baseUrl) {
+                val normalizedUrl = repository.baseUrl
+                if (normalizedUrl.isNotBlank() && normalizedUrl != daemon.baseUrl) {
                     runCatching { store.upsertDaemon(daemon.copy(baseUrl = normalizedUrl)) }
                         .onFailure { AppLogger.w("Home", "回写 Daemon 地址失败", it) }
                 }
@@ -143,7 +154,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 startMonitor()
             } else {
                 val cause = result.exceptionOrNull()
-                cause?.let { AppLogger.w("Home", "连接失败 $normalizedUrl", it) }
+                cause?.let { AppLogger.w("Home", "连接失败 ${daemon.baseUrl}", it) }
                 // 与 ConnectViewModel 一致：带上 e.message，便于区分 401（鉴权失败）与网络不可达
                 val reason = cause?.message?.takeIf { it.isNotBlank() }
                     ?: "无法连接守护进程，请检查地址、协议与 API Key"
@@ -247,6 +258,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val leftRunning = previous == 2 && instance.status != 2
                 if (becameRunning || leftRunning) {
                     val item = ServerNotification(
+                        daemonId = _state.value.daemonId,
                         id = instance.id,
                         instanceName = instance.name ?: "实例 #${instance.id}",
                         isOpened = becameRunning,
@@ -257,6 +269,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     runCatching {
                         ServerNotificationHelper.notifyServerStatus(
                             context = getApplication(),
+                            daemonId = item.daemonId,
                             instanceId = instance.id,
                             instanceName = item.instanceName,
                             isOpened = becameRunning,

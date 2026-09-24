@@ -103,65 +103,84 @@ fun UserCenterScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
-        when {
-            state.loading && state.user == null -> BoxLoading(Modifier.fillMaxSize().padding(innerPadding))
-            state.user == null -> ErrorContent(
-                message = state.error ?: "未获取到用户信息",
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
-                onRetry = viewModel::load,
-            )
-            else -> {
-                val user = state.user!!
-                val isSystemUser = user.isSystemUser
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(innerPadding),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+        // 账号体系每台 Daemon 独立（去主连接）：多台时先选服务端，再看它的账号与资源
+        val showSelector = state.daemons.size > 1
+        Column(Modifier.fillMaxSize().padding(innerPadding)) {
+            if (showSelector) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    item {
-                        ProfileCard(user = user, onEdit = { showSelfEditor = true }, canEdit = !isSystemUser)
+                    state.daemons.forEach { daemon ->
+                        FilterChip(
+                            selected = daemon.id == state.selectedDaemonId,
+                            onClick = { viewModel.selectDaemon(daemon.id) },
+                            label = { Text(daemon.name.ifBlank { daemon.id }) },
+                        )
                     }
-                    item {
-                        Text("账号安全", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    }
-                    item {
-                        Card(shape = RoundedCornerShape(12.dp)) {
-                            val clipboard = LocalClipboardManager.current
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("API Key", style = MaterialTheme.typography.labelLarge)
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(user.apiKey ?: "未返回", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                                    IconButton(enabled = !user.apiKey.isNullOrBlank(), onClick = { clipboard.setText(AnnotatedString(user.apiKey.orEmpty())) }) {
-                                        Icon(Icons.Filled.Settings, contentDescription = "复制 API Key")
+                }
+            }
+            val contentModifier = Modifier.fillMaxSize()
+            when {
+                state.loading && state.user == null -> BoxLoading(contentModifier)
+                state.user == null -> ErrorContent(
+                    message = state.error ?: "未获取到用户信息",
+                    modifier = contentModifier,
+                    onRetry = viewModel::load,
+                )
+                else -> {
+                    val user = state.user!!
+                    val isSystemUser = user.isSystemUser
+                    LazyColumn(
+                        modifier = contentModifier,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        item {
+                            ProfileCard(user = user, onEdit = { showSelfEditor = true }, canEdit = !isSystemUser)
+                        }
+                        item {
+                            Text("账号安全", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        }
+                        item {
+                            Card(shape = RoundedCornerShape(12.dp)) {
+                                val clipboard = LocalClipboardManager.current
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("API Key", style = MaterialTheme.typography.labelLarge)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(user.apiKey ?: "未返回", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                                        IconButton(enabled = !user.apiKey.isNullOrBlank(), onClick = { clipboard.setText(AnnotatedString(user.apiKey.orEmpty())) }) {
+                                            Icon(Icons.Filled.Settings, contentDescription = "复制 API Key")
+                                        }
+                                    }
+                                    Text("可复制 API Key 用于连接 Daemon。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                        if (user.role.equals("admin", ignoreCase = true) || isSystemUser) {
+                            item {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text("用户管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = { showCreateEditor = true }) {
+                                        Icon(Icons.Filled.Add, contentDescription = null)
+                                        Text("创建用户")
                                     }
                                 }
-                                Text("可复制 API Key 用于连接 Daemon。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                        }
-                    }
-                    if (user.role.equals("admin", ignoreCase = true) || isSystemUser) {
-                        item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text("用户管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                TextButton(onClick = { showCreateEditor = true }) {
-                                    Icon(Icons.Filled.Add, contentDescription = null)
-                                    Text("创建用户")
+                            if (state.users.isEmpty()) {
+                                item { Text("暂无其他用户", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            } else {
+                                items(state.users, key = { it.id.orEmpty() }) { managedUser ->
+                                    ManagedUserCard(
+                                        user = managedUser,
+                                        currentUserId = user.id,
+                                        onEdit = { editingUser = managedUser },
+                                        onDelete = { deletingUser = managedUser },
+                                    )
                                 }
-                            }
-                        }
-                        if (state.users.isEmpty()) {
-                            item { Text("暂无其他用户", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        } else {
-                            items(state.users, key = { it.id.orEmpty() }) { managedUser ->
-                                ManagedUserCard(
-                                    user = managedUser,
-                                    currentUserId = user.id,
-                                    onEdit = { editingUser = managedUser },
-                                    onDelete = { deletingUser = managedUser },
-                                )
                             }
                         }
                     }

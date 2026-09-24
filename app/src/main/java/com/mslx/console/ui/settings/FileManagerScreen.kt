@@ -51,20 +51,21 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.mslx.console.data.ServerRef
 import com.mslx.console.data.model.FileItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileManagerScreen(
-    instanceId: Long,
+    ref: ServerRef,
     onBack: () -> Unit,
 ) {
     val viewModel: FileManagerViewModel = viewModel(
-        key = "file_manager_$instanceId",
+        key = "file_manager_${ref.catalogKey}",
         factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
-                FileManagerViewModel(app, instanceId)
+                FileManagerViewModel(app, ref)
             }
         },
     )

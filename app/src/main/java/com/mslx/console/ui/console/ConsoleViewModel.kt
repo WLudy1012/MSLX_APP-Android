@@ -6,6 +6,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppLogger
+import com.mslx.console.data.InstanceRepository
+import com.mslx.console.data.ServerRef
+import com.mslx.console.data.ensureRepository
 import com.mslx.console.data.remote.ConsoleHubClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -66,12 +69,23 @@ data class ConsoleUiState(
 
 class ConsoleViewModel(
     application: Application,
-    private val instanceId: Long,
+    /** 目标实例：[ServerRef.daemonId] 决定操作哪台服务端（去主连接）。 */
+    private val ref: ServerRef,
 ) : AndroidViewModel(application), ConsoleController {
 
-    private val repository = getApplication<MSLXApplication>().container.instanceRepository
+    private val container = getApplication<MSLXApplication>().container
 
-    private val _state = MutableStateFlow(ConsoleUiState(instanceName = "实例 #$instanceId"))
+    /**
+     * 目标 Daemon 的连接。启动时 registry 通常已同步，构造即命中；
+     * 未命中（进程重建后直接进入本页）时先退化为未配置仓储，由 init 里的
+     * ensureRepository 补齐后替换（服务端真被删除则保持未配置，调用返回错误而不是崩溃）。
+     */
+    private var repository: InstanceRepository =
+        container.repositoryFor(ref.daemonId) ?: InstanceRepository()
+
+    private val instanceId: Long get() = ref.remoteIdOrNull ?: -1L
+
+    private val _state = MutableStateFlow(ConsoleUiState(instanceName = "实例 #${ref.instanceId}"))
     override val state = _state.asStateFlow()
 
     private val _logs = MutableStateFlow<List<LogLine>>(emptyList())
@@ -91,13 +105,13 @@ class ConsoleViewModel(
     init {
         // 日志微批消费：攒批后一次性发布，取代逐行全量拷贝与重复重组
         viewModelScope.launch { drainLogs() }
+        // 单一串行协程：先确保连接已解析，再加载、建连、轮询（避免轮询比首连更早解析仓储）
         viewModelScope.launch {
+            container.ensureRepository(ref.daemonId)?.let { repository = it }
             loadInfo()
             connectHub()
-        }
-        // 周期性刷新状态(运行时长、在线人数、启停状态)；顺带同步控制台连接实况
-        // （断线自动重连期间 UI 显示“正在重连”，连上后错误提示自动消失）
-        viewModelScope.launch {
+            // 周期性刷新状态(运行时长、在线人数、启停状态)；顺带同步控制台连接实况
+            // （断线自动重连期间 UI 显示“正在重连”，连上后错误提示自动消失）
             while (true) {
                 try {
                     loadInfo()

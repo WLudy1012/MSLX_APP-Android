@@ -12,14 +12,16 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
 import com.mslx.console.data.AppSettings
+import com.mslx.console.data.ServerRef
 import com.mslx.console.ui.ConnectivityHost
 import com.mslx.console.ui.ServerNotificationHelper
 import com.mslx.console.ui.navigation.AppNavHost
@@ -34,15 +36,22 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    /** 通知点击待打开的实例 id（-1 表示无）。 */
-    private val pendingInstanceId = mutableLongStateOf(-1L)
+    /** 通知点击待打开的实例（去主连接：daemonId + instanceId 才能定位）；null 表示无。 */
+    private val pendingRef = mutableStateOf<ServerRef?>(null)
+
+    /** 从 Intent 取通知携带的实例定位符。 */
+    private fun intentServerRef(intent: Intent?): ServerRef? {
+        val instanceId = intent?.getLongExtra(ServerNotificationHelper.EXTRA_INSTANCE_ID, -1L) ?: -1L
+        val daemonId = intent?.getStringExtra(ServerNotificationHelper.EXTRA_DAEMON_ID)
+        if (instanceId <= 0 || daemonId.isNullOrBlank()) return null
+        return ServerRef.remote(daemonId, instanceId)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         installSplashScreen()
         enableEdgeToEdge()
-        pendingInstanceId.longValue =
-            intent?.getLongExtra(ServerNotificationHelper.EXTRA_INSTANCE_ID, -1L) ?: -1L
+        pendingRef.value = intentServerRef(intent)
 
         val app = application as MSLXApplication
         setContent {
@@ -68,13 +77,14 @@ class MainActivity : ComponentActivity() {
             }
 
             // 启动完成后（onboarded 且 SPLASH 结束）跳转到通知对应的实例控制台
-            LaunchedEffect(settings.onboarded, pendingInstanceId.longValue) {
-                if (pendingInstanceId.longValue > 0 && settings.onboarded) {
+            LaunchedEffect(settings.onboarded, pendingRef.value) {
+                val ref = pendingRef.value
+                if (ref != null && settings.onboarded) {
                     delay(2400) // 等待 SPLASH(1.6s) + 导航动画完成
-                    navController.navigate(Routes.console(pendingInstanceId.longValue)) {
+                    navController.navigate(Routes.console(ref)) {
                         launchSingleTop = true
                     }
-                    pendingInstanceId.longValue = -1
+                    pendingRef.value = null
                 }
             }
 
@@ -107,7 +117,6 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        pendingInstanceId.longValue =
-            intent.getLongExtra(ServerNotificationHelper.EXTRA_INSTANCE_ID, -1L)
+        pendingRef.value = intentServerRef(intent)
     }
 }

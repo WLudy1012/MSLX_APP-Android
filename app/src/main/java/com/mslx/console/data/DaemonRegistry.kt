@@ -12,6 +12,9 @@ import java.util.concurrent.ConcurrentHashMap
 /** 单个 Daemon 的连接状态。 */
 enum class DaemonState { UNKNOWN, ONLINE, OFFLINE }
 
+/** Daemon 选择项（新建实例页 / 用户中心等“先选一台服务端”的场景共用）。 */
+data class DaemonOption(val id: String, val name: String)
+
 /** 单个 Daemon 的运行时状态（并行探测结果）。 */
 data class DaemonStatus(
     val id: String,
@@ -21,7 +24,11 @@ data class DaemonStatus(
     val version: String? = null,
     val instanceCount: Int? = null,
     val latencyMs: Long? = null,
-    val isPrimary: Boolean = false,
+    /**
+     * 是否为「默认 Daemon」——仅用作新建实例的默认落点与主页首屏页码，
+     * **不代表任何连接优先级**（各 Daemon 地位完全对等）。
+     */
+    val isDefault: Boolean = false,
     val checkedAt: Long = 0L,
 ) {
     val stateText: String
@@ -33,68 +40,55 @@ data class DaemonStatus(
 }
 
 /**
- * **多 Daemon 同时连接管理**：每台 Daemon 各自持有一个 [InstanceRepository]（独立的 REST 客户端
- * 与 SignalR 客户端），状态探测并行执行，互不影响。
+ * **多 Daemon 同时连接管理（无主连接）**：每台 Daemon 各自持有一个 [InstanceRepository]
+ * （独立的 REST 客户端与 SignalR 客户端工厂），按 daemonId 索引，状态探测并行执行、互不影响。
  *
- * 兼容策略：主 Daemon（`activeDaemonId`）复用全局 [InstanceRepository]（configure 到它），
- * 因此既有的主页/实例/创建/控制台页面**无需改动**就继续指向主连接；其余 Daemon 用额外实例，
- * 供总览页并行管理（列表/状态/切换为主）。
+ * 页面一律通过 [repositoryFor] 取得目标连接，再以 [ServerRef] 定位实例；
+ * 不存在「当前全局连接」，因此任一页面的操作不会影响其它 Daemon 的上下文。
  */
-class DaemonRegistry(
-    private val primaryRepository: InstanceRepository,
-) {
+class DaemonRegistry {
 
-    /** 非主 Daemon 的独立连接（主 Daemon 走 primaryRepository）。 */
-    private val extraRepositories = ConcurrentHashMap<String, InstanceRepository>()
+    /** daemonId → 该 Daemon 的独立连接。 */
+    private val repositories = ConcurrentHashMap<String, InstanceRepository>()
 
     private val _statuses = MutableStateFlow<Map<String, DaemonStatus>>(emptyMap())
     val statuses: StateFlow<Map<String, DaemonStatus>> = _statuses.asStateFlow()
 
-    private val _primaryId = MutableStateFlow<String?>(null)
-    val primaryId: StateFlow<String?> = _primaryId.asStateFlow()
-
-    /** 当前已建立连接的 Daemon 数量（含主连接）。 */
-    val connectedCount: Int get() = 1 + extraRepositories.size
+    /** 已建立连接的 Daemon 数量。 */
+    val connectedCount: Int get() = repositories.size
 
     /**
-     * 按设置同步连接：主 Daemon 配置到全局 repository，其余各建一个 repository；
-     * 设置里已删除的 Daemon 会释放其连接与状态。
+     * 按设置同步连接：为每台已配置 Daemon 建立（或复用）连接并下发配置，
+     * 设置里已删除的 Daemon 会移除其连接与状态。
      */
     fun sync(settings: AppSettings) {
-        _primaryId.value = settings.activeDaemonId
         val ids = settings.daemons.map { it.id }.toSet()
-        extraRepositories.keys.retainAll(ids)
+        repositories.keys.retainAll(ids)
 
         settings.daemons.forEach { daemon ->
-            if (daemon.id == settings.activeDaemonId) {
-                primaryRepository.configure(daemon.baseUrl, daemon.apiKey, daemon.allowHttp)
-            } else {
-                // 配置变更判定已下沉到 InstanceRepository.configure（内部早退），此处直接调用
-                val repo = extraRepositories.getOrPut(daemon.id) { InstanceRepository() }
-                repo.configure(daemon.baseUrl, daemon.apiKey, daemon.allowHttp)
-            }
+            // 配置变更判定已下沉到 InstanceRepository.configure（内部早退），此处直接调用
+            repositories.getOrPut(daemon.id) { InstanceRepository() }
+                .configure(daemon.baseUrl, daemon.apiKey, daemon.allowHttp)
         }
 
         _statuses.update { map ->
             map.filterKeys { it in ids }.mapValues { (id, status) ->
-                val daemon = settings.daemons.firstOrNull { it.id == id }
                 status.copy(
-                    name = daemon?.name.orEmpty(),
-                    isPrimary = id == settings.activeDaemonId,
+                    name = settings.daemons.firstOrNull { it.id == id }?.name.orEmpty(),
+                    isDefault = id == settings.activeDaemonId,
                 )
             }
         }
     }
 
     /** 取得某 Daemon 的连接（未同步或不存在时返回 null）。 */
-    fun repositoryFor(daemonId: String): InstanceRepository? =
-        if (daemonId == _primaryId.value) primaryRepository else extraRepositories[daemonId]
-
-    /** 主连接（既有页面默认使用的连接）。 */
-    fun primaryRepository(): InstanceRepository = primaryRepository
+    fun repositoryFor(daemonId: String): InstanceRepository? = repositories[daemonId]
 
     fun statusOf(daemonId: String): DaemonStatus =
         _statuses.value[daemonId] ?: DaemonStatus(daemonId)
+
+    /** 全部已配置 Daemon 的连接（供多路订阅/聚合场景使用）。 */
+    fun allRepositories(): Map<String, InstanceRepository> = repositories.toMap()
 
     /** 并行刷新所有 Daemon 的状态（在线/版本/实例数/延迟）。 */
     suspend fun refreshAll(settings: AppSettings) {
@@ -104,7 +98,7 @@ class DaemonRegistry(
                 daemon.id to (map[daemon.id] ?: DaemonStatus(
                     id = daemon.id,
                     name = daemon.name,
-                    isPrimary = daemon.id == settings.activeDaemonId,
+                    isDefault = daemon.id == settings.activeDaemonId,
                 ))
             }
         }
@@ -117,7 +111,7 @@ class DaemonRegistry(
     }
 
     /** 刷新单个 Daemon 状态。 */
-    suspend fun refreshOne(config: DaemonConfig, isPrimary: Boolean = false) {
+    suspend fun refreshOne(config: DaemonConfig, isDefault: Boolean = false) {
         val repository = repositoryFor(config.id) ?: return
         val startedAt = System.currentTimeMillis()
         val verify = repository.verify()
@@ -132,7 +126,7 @@ class DaemonRegistry(
                     state = DaemonState.OFFLINE,
                     message = verify.exceptionOrNull()?.message ?: "连接失败",
                     latencyMs = latency,
-                    isPrimary = isPrimary,
+                    isDefault = isDefault,
                     checkedAt = checkedAt,
                 ))
             }
@@ -149,7 +143,7 @@ class DaemonRegistry(
                 version = status?.version,
                 instanceCount = instanceCount,
                 latencyMs = latency,
-                isPrimary = isPrimary,
+                isDefault = isDefault,
                 checkedAt = checkedAt,
             ))
         }

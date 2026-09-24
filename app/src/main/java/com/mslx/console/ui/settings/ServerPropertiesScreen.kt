@@ -51,6 +51,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.mslx.console.data.ServerRef
 import com.mslx.console.data.model.PropOption
 import com.mslx.console.data.model.PropSchema
 import com.mslx.console.data.model.PropType
@@ -63,15 +64,15 @@ private val PROPERTY_GROUPS: Map<String, List<PropSchema>> = SERVER_PROPERTIES_S
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ServerPropertiesScreen(
-    instanceId: Long,
+    ref: ServerRef,
     onBack: () -> Unit,
 ) {
     val viewModel: ServerPropertiesViewModel = viewModel(
-        key = "server_props_$instanceId",
+        key = "server_props_${ref.catalogKey}",
         factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
-                ServerPropertiesViewModel(app, instanceId)
+                ServerPropertiesViewModel(app, ref)
             }
         },
     )

@@ -60,21 +60,22 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.mslx.console.data.ServerRef
 
 enum class PmFilter { ALL, ENABLED, DISABLED, CLIENT }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PluginsModsScreen(
-    instanceId: Long,
+    ref: ServerRef,
     onBack: () -> Unit,
 ) {
     val viewModel: PluginsModsViewModel = viewModel(
-        key = "pm_$instanceId",
+        key = "pm_${ref.catalogKey}",
         factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
-                PluginsModsViewModel(app, instanceId)
+                PluginsModsViewModel(app, ref)
             }
         },
     )

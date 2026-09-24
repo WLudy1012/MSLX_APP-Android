@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.ManagedServer
+import com.mslx.console.data.ServerRef
 import com.mslx.console.ui.StatusBadge
 import com.mslx.console.ui.StatusDot
 import com.mslx.console.ui.statusColor
@@ -63,8 +64,8 @@ fun InstancesScreen(
     onOpenHome: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenNewInstance: () -> Unit,
-    onOpenInstance: (Long) -> Unit,
-    onOpenLocalInstance: (String) -> Unit,
+    /** 打开实例（本机与远程统一：路由自带 daemonId，不再依赖“主连接”）。 */
+    onOpenServer: (ServerRef) -> Unit,
     viewModel: InstancesViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -166,13 +167,7 @@ fun InstancesScreen(
                             items(state.servers, key = { it.key }) { server ->
                                 InstanceCard(
                                     server = server,
-                                    onClick = {
-                                        if (server.isLocal) {
-                                            server.localDirName?.let(onOpenLocalInstance)
-                                        } else {
-                                            server.remoteId?.let(onOpenInstance)
-                                        }
-                                    },
+                                    onClick = { server.ref?.let(onOpenServer) },
                                     onDelete = { pendingDelete = server },
                                     modifier = Modifier.animateItem(),
                                 )

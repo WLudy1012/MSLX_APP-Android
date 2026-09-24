@@ -51,23 +51,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.mslx.console.data.ServerRef
 import com.mslx.console.data.model.ServerSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InstanceSettingsScreen(
-    instanceId: Long,
+    ref: ServerRef,
     onBack: () -> Unit,
     onOpenPluginsMods: () -> Unit,
     onOpenServerProps: () -> Unit,
     onOpenFileManager: () -> Unit,
 ) {
     val viewModel: InstanceSettingsViewModel = viewModel(
-        key = "instance_settings_$instanceId",
+        key = "instance_settings_${ref.catalogKey}",
         factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
-                InstanceSettingsViewModel(app, instanceId)
+                InstanceSettingsViewModel(app, ref)
             }
         },
     )

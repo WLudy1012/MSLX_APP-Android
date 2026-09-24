@@ -72,6 +72,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mslx.console.data.ServerRef
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -83,8 +84,8 @@ fun CreateInstanceScreen(
     onOpenHome: () -> Unit,
     onOpenInstances: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenConsole: (Long) -> Unit,
-    onOpenLocalConsole: (String) -> Unit,
+    /** 创建完成后打开实例控制台：本机/远程统一用 [ServerRef]（远程带目标 daemonId）。 */
+    onOpenServer: (ServerRef) -> Unit,
     viewModel: CreateInstanceViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -140,11 +141,11 @@ fun CreateInstanceScreen(
                         if (state.target == "local") {
                             val dir = state.createdDirName
                             viewModel.reset()
-                            onOpenLocalConsole(dir)
+                            onOpenServer(ServerRef.local(dir))
                         } else {
-                            val id = state.createdServerId.toLongOrNull() ?: 0L
+                            val id = state.createdServerId.toLongOrNull() ?: return@SuccessContent
                             viewModel.reset()
-                            onOpenConsole(id)
+                            onOpenServer(ServerRef.remote(state.selectedDaemonId, id))
                         }
                     },
                     onReset = viewModel::reset,
@@ -168,6 +169,7 @@ fun CreateInstanceScreen(
                     state = state,
                     onUpdate = viewModel::update,
                     onTargetChange = viewModel::setTarget,
+                    onDaemonChange = viewModel::setDaemon,
                     onSelectLocalRuntime = viewModel::selectLocalRuntime,
                     onModeChange = viewModel::setMode,
                     onNext = viewModel::nextStep,
@@ -224,6 +226,8 @@ private fun FormContent(
     state: CreateInstanceUiState,
     onUpdate: ((CreateInstanceUiState) -> CreateInstanceUiState) -> Unit,
     onTargetChange: (String) -> Unit,
+    /** 切换目标 Daemon（仅远程目标）。 */
+    onDaemonChange: (String) -> Unit,
     onSelectLocalRuntime: (String) -> Unit,
     onModeChange: (Int) -> Unit,
     onNext: () -> Unit,
@@ -248,6 +252,32 @@ private fun FormContent(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("daemon" to "远程 Daemon", "local" to "本机").forEach { (value, label) ->
                 FilterChip(selected = state.target == value, onClick = { onTargetChange(value) }, label = { Text(label) })
+            }
+        }
+        // 远程目标：选择实例落到哪台 Daemon（去主连接后不再隐含“当前连接”）
+        if (!isLocal) {
+            Spacer(Modifier.height(8.dp))
+            if (state.availableDaemons.size > 1) {
+                Text("目标服务端", style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    state.availableDaemons.forEach { daemon ->
+                        FilterChip(
+                            selected = state.selectedDaemonId == daemon.id,
+                            onClick = { onDaemonChange(daemon.id) },
+                            label = { Text(daemon.name.ifBlank { daemon.id }) },
+                        )
+                    }
+                }
+            } else if (state.availableDaemons.isEmpty()) {
+                Text(
+                    "尚未配置 Daemon，请先到设置页添加连接，或选择「本机」创建。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
         Spacer(Modifier.height(12.dp))

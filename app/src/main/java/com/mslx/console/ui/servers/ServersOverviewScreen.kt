@@ -39,6 +39,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.DaemonState
 import com.mslx.console.data.DaemonStatus
 import com.mslx.console.data.ManagedServer
+import com.mslx.console.data.ServerRef
 
 /**
  * 服务端总览：多 Daemon 连接状态 + 统一服务端列表。
@@ -48,8 +49,9 @@ import com.mslx.console.data.ManagedServer
 @Composable
 fun ServersOverviewScreen(
     onBack: () -> Unit,
-    onOpenLocalServer: (String) -> Unit,
-    onOpenConsole: (Long) -> Unit,
+    /** 打开实例：本机与控制台走同一套带 daemonId 的路由（去主连接）。 */
+    onOpenServer: (ServerRef) -> Unit,
+    /** 进入新建实例向导（云端 / 本机由向导内的「创建目标」区分）。 */
     onOpenCreate: () -> Unit,
     viewModel: ServersOverviewViewModel = viewModel(),
 ) {
@@ -92,7 +94,7 @@ fun ServersOverviewScreen(
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Text(
-                        "所有 Daemon 同时保持连接并并行探测状态，互不影响；标「主连接」的那台是既有页面（主页/实例/控制台）默认操作对象。",
+                        "所有 Daemon 同时保持连接并并行探测状态，互不影响；各服务端完全对等，标「默认」的那台只影响新建实例的默认落点。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -106,7 +108,7 @@ fun ServersOverviewScreen(
                         state.daemons.forEach { daemon ->
                             DaemonRow(
                                 status = daemon,
-                                onSetPrimary = { viewModel.setPrimary(daemon.id) },
+                                onSetDefault = { viewModel.setDefault(daemon.id) },
                             )
                         }
                     }
@@ -132,13 +134,7 @@ fun ServersOverviewScreen(
                         state.servers.forEach { server ->
                             ServerRow(
                                 server = server,
-                                onOpen = {
-                                    if (server.isLocal) {
-                                        onOpenLocalServer(server.localDirName.orEmpty())
-                                    } else {
-                                        server.remoteId?.let(onOpenConsole)
-                                    }
-                                },
+                                onOpen = { server.ref?.let(onOpenServer) },
                                 onStopLocal = viewModel::stopLocal,
                                 onDeleteLocal = { server.localDirName?.let(viewModel::deleteLocal) },
                             )
@@ -156,7 +152,7 @@ fun ServersOverviewScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = onOpenCreate, modifier = Modifier.weight(1f)) { Text("新建云端实例") }
                 OutlinedButton(
-                    onClick = { onOpenLocalServer("") },
+                    onClick = onOpenCreate,
                     modifier = Modifier.weight(1f),
                 ) { Text("本机开服") }
             }
@@ -166,7 +162,7 @@ fun ServersOverviewScreen(
 }
 
 @Composable
-private fun DaemonRow(status: DaemonStatus, onSetPrimary: () -> Unit) {
+private fun DaemonRow(status: DaemonStatus, onSetDefault: () -> Unit) {
     val dotColor = when (status.state) {
         DaemonState.ONLINE -> MaterialTheme.colorScheme.primary
         DaemonState.OFFLINE -> MaterialTheme.colorScheme.error
@@ -177,7 +173,7 @@ private fun DaemonRow(status: DaemonStatus, onSetPrimary: () -> Unit) {
         Spacer(Modifier.width(6.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                text = status.name.ifBlank { status.id } + if (status.isPrimary) "（主连接）" else "",
+                text = status.name.ifBlank { status.id } + if (status.isDefault) "（默认）" else "",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
@@ -194,8 +190,8 @@ private fun DaemonRow(status: DaemonStatus, onSetPrimary: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (!status.isPrimary) {
-            TextButton(onClick = onSetPrimary) { Text("设为主连接") }
+        if (!status.isDefault) {
+            TextButton(onClick = onSetDefault) { Text("设为默认") }
         }
     }
 }
