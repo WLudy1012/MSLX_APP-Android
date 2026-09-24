@@ -24,7 +24,3 @@ ACTIONS_GUIDE.md
 /develops/
 /MSLX-dev/
 /_icons/
-# Daemon 插件工程构建产物
-/daemon-plugin/**/bin/
-/daemon-plugin/**/obj/
-/daemon-plugin/**/dist/
