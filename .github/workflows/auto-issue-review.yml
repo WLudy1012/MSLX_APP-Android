@@ -1,13 +1,12 @@
 name: Auto Issue Review
-
 on:
   issues:
-    types: [opened]          # 仅在新建 Issue 时自动触发，无需标签
+    types: [opened]
 
 permissions:
-  contents: read             # 读取 Prompt 文件
-  issues: write              # 添加评论和标签
-  models: read               # 调用 GitHub Models 推理 API
+  contents: read
+  issues: write
+  models: read
 
 jobs:
   review:
@@ -37,8 +36,8 @@ jobs:
           model: openai/gpt-4o-mini
           prompt-file: ./Prompts/issue-review.prompt.yml
           input: |
-            Title: ${{ steps.issue.outputs.title }}
-            Body: ${{ steps.issue.outputs.body }}
+            title: ${{ steps.issue.outputs.title }}
+            body: ${{ steps.issue.outputs.body }}
 
       - name: Parse and apply AI output
         uses: actions/github-script@v7
@@ -49,7 +48,6 @@ jobs:
             const raw = process.env.AI_RESPONSE;
             let parsed;
             try {
-              // 尝试从响应中提取 JSON 对象
               const match = raw.match(/\{[\s\S]*\}/);
               parsed = JSON.parse(match ? match[0] : raw);
             } catch (e) {
@@ -59,8 +57,9 @@ jobs:
 
             const allowedLabels = [
               'bug', 'enhancement', 'question', 'documentation',
-              'good first issue', 'help wanted', 'duplicate',
-              'needs-info', 'priority/critical', 'priority/high', 'priority/low'
+              'accessibility', 'good first issue', 'help wanted',
+              'duplicate', 'needs-info', 'invalid', 'wontfix',
+              'priority/critical', 'priority/high', 'priority/low'
             ];
 
             const existingLabels = '${{ steps.issue.outputs.existing_labels }}'
