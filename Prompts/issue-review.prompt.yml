@@ -22,7 +22,9 @@ messages:
         "comment": "Markdown comment text here"
       }
   - role: user
-    content: '{{input}}'
+    content: |
+      Title: {{title}}
+      Body: {{body}}
 model: openai/gpt-4o-mini
 modelParameters:
   max_tokens: 600
