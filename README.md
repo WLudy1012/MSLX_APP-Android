@@ -188,7 +188,8 @@ MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器
 - **auto-issue-review.yml**：新 issue 打开时用 AI 自动打标签并评论。直接调用 GitHub Copilot CLI
   （`copilot -p ... -s --no-ask-user`，官方推荐模式，提示词模板在 `Prompts/issue-review-instructions.txt`；
   此前用的 `actions/ai-inference@v1` 内部仍走已退役的 GitHub Models 端点，2026-07-30 起必然失败）。
-  认证走内置 GITHUB_TOKEN + `copilot-requests: write`（无需 PAT，计费到账号 Copilot 订阅）；
+  评审前会实际检索仓库代码（只读授权 + 只读 git 历史查询），输出「结论/置信度/代码定位/原因假设」
+  的结构化分析。认证走内置 GITHUB_TOKEN + `copilot-requests: write`（无需 PAT，计费到账号 Copilot 订阅）；
   账号无可用 Copilot 订阅/额度或 CLI 故障时该步骤静默降级（仅打 warning，不影响 issue 流程）。
 
 ### release.yml 所需 Secrets

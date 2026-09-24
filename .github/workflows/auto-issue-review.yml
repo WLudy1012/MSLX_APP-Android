@@ -24,6 +24,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # AI 会用 git log/blame 查历史，浅克隆只给 1 个提交不够用
+          fetch-depth: 100
 
       # Copilot CLI 未预装在 runner 上，需自行安装（官方文档要求近期版本）。
       - name: Set up Node.js
@@ -75,12 +78,18 @@ jobs:
         # AI 不可用（无订阅/额度/网络/CLI 故障）时不让 issue 流程变红：
         # 失败仅打 warning，Parse 步骤读不到输出文件时做空值降级。
         continue-on-error: true
+        # 探索式代码分析比纯文本评审慢，给足时间并留超时兑底
+        timeout-minutes: 10
         env:
           # 官方支持的免 PAT 方案：GITHUB_TOKEN + 本文件的 copilot-requests 权限
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          # 不指定 --model，用 CLI 默认模型（显式传不支持的模型名会直接失败）
+          # 只读授权：读文件/搜索 + 只读 git 历史查询，配合 deny 双保险禁写。
+          # 其余需要权限的操作（写文件、其他 shell、网络）在 -p 模式下自动被拒。
+          # 不指定 --model，用 CLI 默认模型（显式传不支持的模型名会直接失败）。
           copilot -p "$(cat "$RUNNER_TEMP/ai-prompt.txt")" -s --no-ask-user \
+            --allow-tool='read,shell(git log:*),shell(git show:*),shell(git diff:*),shell(git blame:*)' \
+            --deny-tool='write' \
             > "$RUNNER_TEMP/ai-response.txt" 2> "$RUNNER_TEMP/ai-stderr.log" || {
               code=$?
               echo "::warning::Copilot CLI 退出码 $code，stderr 末尾："
