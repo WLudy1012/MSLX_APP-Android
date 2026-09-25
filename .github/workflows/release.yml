@@ -95,7 +95,7 @@ jobs:
           echo "$SHA  $JRE" | sha256sum -c -
           ls -lh "$JRE"
 
-      # Java 21 运行时（Paper 1.20.5+/1.21 需要）不入库、不进 APK，只在发版时从上游
+      # Java 21/25 运行时不入库、不进 APK，只在发版时从上游
       # 镜像抓一份挂成 Release 附件。GitHub 侧走“尽力而为”：失败只告警不阻断发布
       # （下面 files 对不存在的文件会自动跳过），CNB 流水线那边才是硬校验。
       - name: Fetch JRE 21 runtime archive
@@ -108,6 +108,19 @@ jobs:
           else
             rm -f "$JRE21"
             echo "::warning::获取 jre21 归档失败，本次 Release 将不含该附件（客户端会回退到 FCL 直链）"
+          fi
+
+      # 客户端已支持 Java 25；同步发布 GitHub 镜像，避免该下载来源固定返回 404。
+      - name: Fetch JRE 25 runtime archive
+        run: |
+          JRE25=jre25-arm64-20260223-release.tar.xz
+          SHA=0fdf6d19fe66ea61c12caa24bd655227ddb0d7d9c16c0f13281a7c2878635286
+          URL="https://pan.huang1111.cn/f/5NOltm/$JRE25"
+          if curl -fL --retry 3 --max-time 900 -o "$JRE25" "$URL" && echo "$SHA  $JRE25" | sha256sum -c -; then
+            ls -lh "$JRE25"
+          else
+            rm -f "$JRE25"
+            echo "::warning::获取 jre25 归档失败，本次 Release 将不含该附件（客户端会回退到 FCL 直链）"
           fi
 
       # 从仓库 Secrets 恢复签名密钥并生成 keystore.properties。
@@ -224,7 +237,7 @@ jobs:
             echo "| \`app-release.apk\` | **完整版**：内嵌 Android JRE 运行时，本机开服可离线使用 | ${FULL_MB} MB | \`$FULL_SHA\` |"
             echo "| \`app-release-lite.apk\` | **精简版**：不含运行时，体积小；本机开服首次使用需联网下载约 36MB 运行时 | ${LITE_MB} MB | \`$LITE_SHA\` |"
             echo ""
-            echo "附件里的 \`jre17-*.tar.xz\` / \`jre21-*.tar.xz\` 是本机开服用的 Android 运行时归档（应用内自动拉取，无需手动安装）。"
+            echo "附件里的 \`jre17-*.tar.xz\` / \`jre21-*.tar.xz\` / \`jre25-*.tar.xz\` 是本机开服用的 Android 运行时归档（应用内自动拉取，无需手动安装）。"
             echo ""
             echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
             echo ""
@@ -243,4 +256,5 @@ jobs:
             app-release-lite.apk
             app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
             jre21-arm64-20260223-release.tar.xz
+            jre25-arm64-20260223-release.tar.xz
           body_path: release_notes.md

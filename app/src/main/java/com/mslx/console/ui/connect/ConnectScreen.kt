@@ -72,6 +72,8 @@ fun ConnectScreen(
     autoConnect: Boolean = true,
     editingDaemonId: String? = null,
 ) {
+    // 新增页面也有返回回调；用路由中的 Daemon ID 区分新增和编辑，避免隐藏扫码入口。
+    val isEditing = !editingDaemonId.isNullOrBlank()
     val viewModel: ConnectViewModel = viewModel(
         key = "connect_${autoConnect}_$editingDaemonId",
         factory = viewModelFactory {
@@ -105,7 +107,7 @@ fun ConnectScreen(
         topBar = {
             if (onBack != null) {
                 TopAppBar(
-                    title = { Text(if (editingDaemonId == null) "添加 Daemon" else "编辑 Daemon") },
+                    title = { Text(if (isEditing) "编辑 Daemon" else "添加 Daemon") },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -242,7 +244,7 @@ fun ConnectScreen(
             }
 
             // 扫码配对：添加模式扫码接入；编辑模式用当前凭据为其它设备生成配对码
-            if (onBack == null) {
+            if (!isEditing) {
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(
                     onClick = {

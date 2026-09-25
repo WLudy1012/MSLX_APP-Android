@@ -165,7 +165,7 @@ class ConnectViewModel(
         }
     }
 
-    // ---------------- 扫码配对（Daemon 插件 mslx-pair） ----------------
+    // ---------------- 扫码配对（MSLX Android 扩展插件，沿用兼容接口） ----------------
 
     /**
      * 处理扫码结果：解析 `mslxp1:` 载荷 → 调用插件 redeem 端点兑换一次性受限 API Key →
@@ -236,7 +236,7 @@ class ConnectViewModel(
                 }
                 .onFailure { e ->
                     val detail = when ((e as? HttpException)?.code()) {
-                        404 -> "服务端未安装扫码配对插件（mslx-pair）或版本过旧。"
+                        404 -> "服务端未安装 MSLX Android 扩展插件，或插件版本过旧。"
                         else -> ApiClient.errorMessageFrom(e) ?: e.message ?: "网络异常"
                     }
                     com.mslx.console.data.AppLogger.w("Connect", "扫码配对失败", e)
@@ -270,7 +270,7 @@ class ConnectViewModel(
                 }
                 .onFailure { e ->
                     val detail = when ((e as? HttpException)?.code()) {
-                        404 -> "服务端未安装扫码配对插件（mslx-pair）或版本过旧。"
+                        404 -> "服务端未安装 MSLX Android 扩展插件，或插件版本过旧。"
                         403 -> "当前 API Key 权限不足：生成配对码需要管理员权限。"
                         else -> ApiClient.errorMessageFrom(e) ?: e.message ?: "网络异常"
                     }

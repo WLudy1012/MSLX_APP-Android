@@ -195,6 +195,8 @@ val GlassBorderWidth: Dp = 1.dp
  * - 全量档：解码到长边 ≤ 1600，交给 RenderEffect 实时模糊；
  * - 基础档：解码后降采样到长边 ≤ 200 并做两轮箱式模糊，作为静态模糊背景。
  */
+// 当前 Compose/Lint 组合误报：下方 producer 已在加载完成后明确写入 value，仅在此处抑制。
+@Suppress("ProduceStateDoesNotAssignValue")
 @Composable
 private fun rememberGlassBitmap(path: String, level: GlassLevel) = produceState<ImageBitmap?>(
     initialValue = null,

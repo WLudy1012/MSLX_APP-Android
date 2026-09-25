@@ -3,7 +3,7 @@ package com.mslx.console.data.model
 import com.google.gson.annotations.SerializedName
 
 /**
- * 扫码配对（Daemon 插件 mslx-pair）相关模型。
+ * 扫码配对（MSLX Android 扩展插件，沿用兼容接口）相关模型。
  * 端点前缀：`/api/plugins/pair`，响应沿用 Daemon 统一结构 { code, message, data }。
  */
 

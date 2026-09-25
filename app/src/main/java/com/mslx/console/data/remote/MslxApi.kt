@@ -159,7 +159,7 @@ interface MslxApi {
         @Body body: SaveUploadRequest,
     ): ApiResponse<Any?>
 
-    // ---------------- 扫码配对（Daemon 插件 mslx-pair） ----------------
+    // ---------------- 扫码配对（MSLX Android 扩展插件，沿用兼容接口） ----------------
 
     /** 生成一次性配对码（需要 admin 权限，TTL 120s）。 */
     @POST("api/plugins/pair/codes")
