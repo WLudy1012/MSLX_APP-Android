@@ -20,21 +20,28 @@ main:
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
-            SDKMAN=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1 || true)
+            # 当前镜像使用 cmdline-tools/bin；同时兼容官方 latest/版本号目录布局。
+            SDKMAN=
+            for candidate in "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
+              if [ -x "$candidate" ]; then
+                SDKMAN="$candidate"
+                break
+              fi
+            done
             if [ -z "$SDKMAN" ]; then
-              echo "ERROR: 未找到 $ANDROID_HOME/cmdline-tools/*/bin/sdkmanager" >&2
-              echo "       镜像自带的 Android SDK 被数据卷遮挡或镜像已变更，构建必然失败。" >&2
+              echo "ERROR: 未找到可执行的 sdkmanager（已检查平铺、latest 和版本号目录）" >&2
+              echo "       请检查 $ANDROID_HOME/cmdline-tools 是否存在，以及 SDK 是否被数据卷遮挡。" >&2
               exit 1
             fi
             echo "sdkmanager: $SDKMAN"
-            yes | "$SDKMAN" --licenses > /dev/null 2>&1 || true
-            yes | "$SDKMAN" "platforms;android-35" "build-tools;35.0.0" "platform-tools" \
+            yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" --licenses > /dev/null 2>&1 || true
+            yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools" \
               || echo "警告：platform/build-tools 预装失败，交由 AGP 自动下载" >&2
             NDK="$ANDROID_HOME/ndk/28.2.13676358"
             if [ -d "$NDK" ]; then
               echo "NDK 28.2.13676358 已缓存（$NDK）"
             else
-              yes | "$SDKMAN" "ndk;28.2.13676358" \
+              yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "ndk;28.2.13676358" \
                 || echo "警告：NDK 预装失败，交由 AGP 自动下载" >&2
             fi
         - name: verify embedded jre runtime
@@ -73,21 +80,28 @@ $:
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
-            SDKMAN=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1 || true)
+            # 当前镜像使用 cmdline-tools/bin；同时兼容官方 latest/版本号目录布局。
+            SDKMAN=
+            for candidate in "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
+              if [ -x "$candidate" ]; then
+                SDKMAN="$candidate"
+                break
+              fi
+            done
             if [ -z "$SDKMAN" ]; then
-              echo "ERROR: 未找到 $ANDROID_HOME/cmdline-tools/*/bin/sdkmanager" >&2
-              echo "       镜像自带的 Android SDK 被数据卷遮挡或镜像已变更，构建必然失败。" >&2
+              echo "ERROR: 未找到可执行的 sdkmanager（已检查平铺、latest 和版本号目录）" >&2
+              echo "       请检查 $ANDROID_HOME/cmdline-tools 是否存在，以及 SDK 是否被数据卷遮挡。" >&2
               exit 1
             fi
             echo "sdkmanager: $SDKMAN"
-            yes | "$SDKMAN" --licenses > /dev/null 2>&1 || true
-            yes | "$SDKMAN" "platforms;android-35" "build-tools;35.0.0" "platform-tools" \
+            yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" --licenses > /dev/null 2>&1 || true
+            yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools" \
               || echo "警告：platform/build-tools 预装失败，交由 AGP 自动下载" >&2
             NDK="$ANDROID_HOME/ndk/28.2.13676358"
             if [ -d "$NDK" ]; then
               echo "NDK 28.2.13676358 已缓存（$NDK）"
             else
-              yes | "$SDKMAN" "ndk;28.2.13676358" \
+              yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "ndk;28.2.13676358" \
                 || echo "警告：NDK 预装失败，交由 AGP 自动下载" >&2
             fi
         - name: restore signing keystore
