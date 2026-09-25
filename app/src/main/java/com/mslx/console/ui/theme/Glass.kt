@@ -3,9 +3,6 @@ package com.mslx.console.ui.theme
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,20 +13,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
@@ -44,7 +38,7 @@ import kotlinx.coroutines.withContext
  * 毛玻璃档位（按系统版本自动判定）：
  * - [NONE]：Android 13 (API 33) 以下不可用；
  * - [BASIC]：Android 13–16（API 33–36）基础档 —— 降采样静态模糊背景 + 半透明面板 + 描边；
- * - [FULL]：Android 17+（API 37+）全量档 —— RenderEffect 实时模糊 + 高光层 + 过渡增强。
+ * - [FULL]：Android 17+（API 37+）全量档 —— 高质量静态模糊背景 + 高光层。
  *
  * 注：compileSdk 35 没有 API 37 常量，系统版本比较直接用数字。
  */
@@ -72,22 +66,11 @@ val LocalGlassAlpha = staticCompositionLocalOf { 1f }
 fun GlassBackground(
     config: ThemeConfig,
     modifier: Modifier = Modifier,
-    /** 路由/页面标识：变化时播放一次轻微缩放过渡（仅全量档），做转场增强。 */
-    transitionKey: Any? = null,
 ) {
     val dark = isSystemInDarkTheme()
     val level = remember { currentGlassLevel() }
     val path = if (dark) config.darkBackground else config.lightBackground
     val bitmap by rememberGlassBitmap(path = path, level = level)
-
-    // 全量档过渡增强：路由变化时背景轻微缩放回落
-    val pulse = remember { Animatable(1f) }
-    if (level == GlassLevel.FULL) {
-        LaunchedEffect(transitionKey) {
-            pulse.snapTo(1.035f)
-            pulse.animateTo(1f, tween(durationMillis = 650, easing = FastOutSlowInEasing))
-        }
-    }
 
     Box(modifier = modifier.fillMaxSize()) {
         val scheme = MaterialTheme.colorScheme
@@ -107,28 +90,12 @@ fun GlassBackground(
         )
         // 2) 自定义背景图（按档位处理模糊）
         if (bitmap != null) {
-            val imageModifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    val tracked = if (level == GlassLevel.FULL) pulse.value else 1f
-                    scaleX = tracked
-                    scaleY = tracked
-                }
-            if (level == GlassLevel.FULL) {
-                Image(
-                    bitmap = bitmap!!,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = imageModifier.blur(radius = 42.dp),
-                )
-            } else {
-                Image(
-                    bitmap = bitmap!!,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = imageModifier,
-                )
-            }
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
         // 3) 全量档额外高光层：左上大范围柔光，增强玻璃质感
         if (level == GlassLevel.FULL && bitmap != null) {
@@ -192,7 +159,7 @@ val GlassBorderWidth: Dp = 1.dp
 
 /**
  * 记忆化加载背景图：
- * - 全量档：解码到长边 ≤ 1600，交给 RenderEffect 实时模糊；
+ * - 全量档：解码到长边 ≤ 960，后台预处理为静态模糊图，避免每帧执行全屏 GPU 模糊；
  * - 基础档：解码后降采样到长边 ≤ 200 并做两轮箱式模糊，作为静态模糊背景。
  */
 // 当前 Compose/Lint 组合误报：下方 producer 已在加载完成后明确写入 value，仅在此处抑制。
@@ -214,14 +181,14 @@ private fun loadGlassBitmap(path: String, level: GlassLevel): ImageBitmap? {
     return try {
         val file = File(path)
         if (!file.exists()) return null
-        val maxSide = if (level == GlassLevel.FULL) 1600 else 480
+        val maxSide = if (level == GlassLevel.FULL) 960 else 480
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, maxSide)
         }
         val decoded = BitmapFactory.decodeFile(path, opts) ?: return null
-        val prepared = if (level == GlassLevel.FULL) decoded else downsampleAndBlur(decoded, 200)
+        val prepared = downsampleAndBlur(decoded, if (level == GlassLevel.FULL) 480 else 200)
         prepared.asImageBitmap()
     } catch (_: Throwable) {
         null

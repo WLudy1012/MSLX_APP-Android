@@ -23,7 +23,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.mslx.console.data.AppSettings
 import com.mslx.console.data.ServerRef
@@ -102,16 +101,12 @@ class MainActivity : ComponentActivity() {
                 lightBackground = settings.lightBackgroundPath,
                 darkBackground = settings.darkBackgroundPath,
             )
-            // 当前路由：毛玻璃背景的转场增强按页面变化触发
-            val routeEntry by navController.currentBackStackEntryAsState()
-
             MSLXConsoleTheme(themeConfig = themeConfig) {
                 CompositionLocalProvider(LocalGlassAlpha provides themeConfig.glassAlpha) {
                     Box(Modifier.fillMaxSize()) {
                         // 毛玻璃背景层：所有页面共用（页面 Scaffold 保持透明以透出背景）
                         GlassBackground(
                             config = themeConfig,
-                            transitionKey = routeEntry?.destination?.route,
                         )
                         AppNavHost(settings = settings, navController = navController)
                         // 全局更新弹窗：启动自动检查 + 手动检查结果都走这里

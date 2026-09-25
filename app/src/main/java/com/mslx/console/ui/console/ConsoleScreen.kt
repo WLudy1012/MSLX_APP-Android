@@ -70,10 +70,12 @@ import com.mslx.console.ui.theme.ConsoleBackground
 import com.mslx.console.ui.theme.ConsoleSystem
 import com.mslx.console.ui.theme.ConsoleText
 import com.mslx.console.ui.theme.ConsoleTextStyle
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 fun ConsoleScreen(
     controller: ConsoleController,
@@ -102,11 +104,12 @@ fun ConsoleScreen(
         }
     }
 
-    // 收到新日志时自动滚动到底部
-    LaunchedEffect(logs.size) {
-        if (autoScroll && logs.isNotEmpty()) {
-            listState.scrollToItem(logs.size - 1)
-        }
+    // 日志高频输出时合并滚动请求，避免每个微批都触发一次布局滚动。
+    LaunchedEffect(autoScroll) {
+        snapshotFlow { logs.size }
+            .filter { autoScroll && it > 0 }
+            .sample(100)
+            .collect { size -> listState.scrollToItem(size - 1) }
     }
 
     // 视口高度变化（点击输入框弹出 IME / 收起键盘/旋转）后，日志区需要重新贴底，
