@@ -1,0 +1,22 @@
+name: 新功能建议
+description: 提议一个新功能或改进方向
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 版本号
+      description: 请填写当前使用的应用版本号。
+      placeholder: 例如：1.1.4
+    validations:
+      required: true
+  - type: textarea
+    id: feature-description
+    attributes:
+      label: 新功能描述
+      description: 请描述希望新增的功能及其使用场景。
+      placeholder: 请描述新功能建议
+    validations:
+      required: true

@@ -38,11 +38,17 @@ main:
             yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools" \
               || echo "警告：platform/build-tools 预装失败，交由 AGP 自动下载" >&2
             NDK="$ANDROID_HOME/ndk/28.2.13676358"
-            if [ -d "$NDK" ]; then
+            if [ -d "$NDK" ] && [ -f "$NDK/source.properties" ]; then
               echo "NDK 28.2.13676358 已缓存（$NDK）"
             else
-              yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "ndk;28.2.13676358" \
-                || echo "警告：NDK 预装失败，交由 AGP 自动下载" >&2
+              echo "NDK 缓存不存在或不完整，重新安装 28.2.13676358"
+              rm -rf "$NDK"
+              yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "ndk;28.2.13676358"
+              test -f "$NDK/source.properties" || {
+                echo "ERROR: NDK 安装完成后仍缺少 source.properties：$NDK" >&2
+                exit 1
+              }
+              echo "NDK 28.2.13676358 安装完成"
             fi
         - name: verify embedded jre runtime
           script: |
@@ -101,11 +107,17 @@ $:
             yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools" \
               || echo "警告：platform/build-tools 预装失败，交由 AGP 自动下载" >&2
             NDK="$ANDROID_HOME/ndk/28.2.13676358"
-            if [ -d "$NDK" ]; then
+            if [ -d "$NDK" ] && [ -f "$NDK/source.properties" ]; then
               echo "NDK 28.2.13676358 已缓存（$NDK）"
             else
-              yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "ndk;28.2.13676358" \
-                || echo "警告：NDK 预装失败，交由 AGP 自动下载" >&2
+              echo "NDK 缓存不存在或不完整，重新安装 28.2.13676358"
+              rm -rf "$NDK"
+              yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "ndk;28.2.13676358"
+              test -f "$NDK/source.properties" || {
+                echo "ERROR: NDK 安装完成后仍缺少 source.properties：$NDK" >&2
+                exit 1
+              }
+              echo "NDK 28.2.13676358 安装完成"
             fi
         - name: restore signing keystore
           script: |

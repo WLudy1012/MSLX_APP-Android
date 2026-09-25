@@ -1,0 +1,41 @@
+name: 普通 Bug 提交
+description: 报告可复现的功能问题
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 版本号
+      description: 请填写出现问题的应用版本号。
+      placeholder: 例如：1.1.4
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 请粘贴与问题相关的完整日志。
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug 描述
+      description: 请描述实际发生了什么，以及预期行为是什么。
+      placeholder: 请描述问题
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现方法
+      description: 请按步骤说明如何稳定复现问题。
+      placeholder: |
+        1. 打开……
+        2. 点击……
+        3. 观察到……
+    validations:
+      required: true

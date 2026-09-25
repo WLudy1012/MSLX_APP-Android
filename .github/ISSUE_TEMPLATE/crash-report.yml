@@ -1,0 +1,14 @@
+name: 崩溃报告提交
+description: 提交应用崩溃报告
+title: "[崩溃] "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: crash-report
+    attributes:
+      label: 崩溃报告
+      description: 请粘贴完整的崩溃报告。
+      placeholder: 请粘贴崩溃报告内容
+    validations:
+      required: true
