@@ -337,7 +337,7 @@ fun AppNavHost(
             ) { backStackEntry ->
                 val ref = backStackEntry.serverRef()
                 val controller: com.mslx.console.ui.console.ConsoleController = if (ref.isLocal) {
-                    viewModel(
+                    viewModel<LocalConsoleViewModel>(
                         key = "localconsole_${ref.instanceId}",
                         factory = viewModelFactory {
                             initializer {
@@ -347,7 +347,7 @@ fun AppNavHost(
                         },
                     )
                 } else {
-                    viewModel(
+                    viewModel<ConsoleViewModel>(
                         key = "console_${ref.catalogKey}",
                         factory = viewModelFactory {
                             initializer {
