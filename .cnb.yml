@@ -58,6 +58,9 @@ main:
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
+            # CNB 出口访问 Maven Central 容易触发 429，统一走阿里云公共镜像。
+            export MSLX_MAVEN_GOOGLE_MIRROR=https://maven.aliyun.com/repository/google
+            export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
             chmod +x gradlew
             ./gradlew assembleDebug --no-daemon --stacktrace
         - name: list debug apk
@@ -190,6 +193,9 @@ $:
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
+            # CNB 出口访问 Maven Central 容易触发 429，Release 与 main 使用同一镜像。
+            export MSLX_MAVEN_GOOGLE_MIRROR=https://maven.aliyun.com/repository/google
+            export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
             [ -f keystore.properties ] || { echo "ERROR: 签名配置缺失，禁止发布未签名包" >&2; exit 1; }
             chmod +x gradlew
             ./gradlew assembleRelease --no-daemon --stacktrace
@@ -200,6 +206,8 @@ $:
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
+            export MSLX_MAVEN_GOOGLE_MIRROR=https://maven.aliyun.com/repository/google
+            export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
             # -PwithoutJre=true 会改变 main 源集的 assets，Gradle 会重建 mergeAssets/package，
             # 因此直接构建即可；完整版已在上一步单独 cp 成 app-release.apk。
             ./gradlew assembleRelease -PwithoutJre=true --no-daemon --stacktrace

@@ -2,4 +2,12 @@
     <color name="window_background">#FFFFFF</color>
     <!-- 与 Compose SplashScreen 的 BrandSulfur(0xFF9FA83A) 一致，避免系统开屏与应用开屏之间颜色割裂 -->
     <color name="splash_background">#9FA83A</color>
+    <color name="scan_background">#0B100F</color>
+    <color name="scan_primary">#D5DF59</color>
+    <color name="scan_text_primary">#F5F7F1</color>
+    <color name="scan_text_secondary">#B8C0B8</color>
+    <color name="scan_panel">#E6141A18</color>
+    <color name="scan_pill">#40363E1E</color>
+    <color name="zxing_viewfinder_laser">#D5DF59</color>
+    <color name="zxing_viewfinder_mask">#99070A09</color>
 </resources>

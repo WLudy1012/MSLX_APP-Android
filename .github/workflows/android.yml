@@ -16,6 +16,8 @@ jobs:
     env:
       # ubuntu runner 自带 SDK 的固定路径；缓存 NDK 等组件时需要以 env 形式引用
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      MSLX_MAVEN_GOOGLE_MIRROR: https://maven.aliyun.com/repository/google
+      MSLX_MAVEN_CENTRAL_MIRROR: https://maven.aliyun.com/repository/public
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -49,6 +49,13 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.connect.PairingScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MSLXConsole.Scanner"
+            android:windowSoftInputMode="stateAlwaysHidden" />
+
         <!-- 本机开服保活：前台服务只负责常驻通知与进程存活，服务端实例在 LocalServerRuntime -->
         <service
             android:name=".data.localengine.LocalServerService"

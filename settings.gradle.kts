@@ -7,7 +7,7 @@
 //
 // 说明：CNB 制品库（maven.cnb.cool）为私有托管仓库，不提供对 google/mavenCentral 的
 // 代理功能（2026-02 调研 docs.cnb.cool/zh/artifact），因此镜像开关做成通用注入，
-// 不绑定任何特定制品库；CNB 流水线目前直接访问官方源可用，未注入。
+// 不绑定任何特定制品库；CNB 流水线会注入上述国内镜像。
 pluginManagement {
     val googleMirror = System.getenv("MSLX_MAVEN_GOOGLE_MIRROR")?.trim().orEmpty()
     val centralMirror = System.getenv("MSLX_MAVEN_CENTRAL_MIRROR")?.trim().orEmpty()

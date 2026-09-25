@@ -15,6 +15,8 @@ jobs:
     env:
       # ubuntu runner 自带 SDK 的固定路径；缓存 NDK 等组件时需要以 env 形式引用
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      MSLX_MAVEN_GOOGLE_MIRROR: https://maven.aliyun.com/repository/google
+      MSLX_MAVEN_CENTRAL_MIRROR: https://maven.aliyun.com/repository/public
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -258,3 +260,16 @@ jobs:
             jre21-arm64-20260223-release.tar.xz
             jre25-arm64-20260223-release.tar.xz
           body_path: release_notes.md
+
+
+      - name: Sync release tag to CNB
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CNB_TOKEN:-}" ]; then
+            echo "::warning::未配置 CNB_TOKEN，跳过 CNB tag 同步；GitHub Release 已完成。"
+            exit 0
+          fi
+          git remote add cnb "https://cnb:${CNB_TOKEN}@cnb.cool/WLudy/MSLX_APP-Android.git"
+          git push cnb "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"

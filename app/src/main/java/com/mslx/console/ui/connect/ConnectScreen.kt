@@ -251,9 +251,10 @@ fun ConnectScreen(
                         scanLauncher.launch(
                             ScanOptions()
                                 .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                                .setPrompt("对准 Daemon 端生成的配对二维码")
+                                .setCaptureActivity(PairingScanActivity::class.java)
+                                .setPrompt("")
                                 .setBeepEnabled(false)
-                                .setOrientationLocked(false),
+                                .setOrientationLocked(true),
                         )
                     },
                     enabled = !state.loading && !state.pairing,
