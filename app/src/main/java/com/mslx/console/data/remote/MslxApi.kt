@@ -37,6 +37,8 @@ import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 
+private const val THIRD_PARTY_ANDROID_ADDONS_ROUTE = "api/plugin/mslx-plugin-thirdparty-android-addons"
+
 /**
  * MSLX Daemon 的 REST API。
  * 认证通过 OkHttp 拦截器统一附加 `x-api-key` 请求头完成。
@@ -159,14 +161,14 @@ interface MslxApi {
         @Body body: SaveUploadRequest,
     ): ApiResponse<Any?>
 
-    // ---------------- 扫码配对（MSLX Android 扩展插件，沿用兼容接口） ----------------
+    // ---------------- 扫码配对（mslx-plugin-thirdparty-android-addons） ----------------
 
     /** 生成一次性配对码（需要 admin 权限，TTL 120s）。 */
-    @POST("api/plugins/pair/codes")
+    @POST("$THIRD_PARTY_ANDROID_ADDONS_ROUTE/pair/codes")
     suspend fun pairCreateCode(@Body body: PairCodeRequest): ApiResponse<PairCodeData>
 
     /** 兑换配对码（匿名端点，插件内部做签名/时效/一次性/IP 限速校验）。 */
-    @POST("api/plugins/pair/redeem")
+    @POST("$THIRD_PARTY_ANDROID_ADDONS_ROUTE/pair/redeem")
     suspend fun pairRedeem(@Body body: PairRedeemRequest): ApiResponse<PairRedeemData>
 
     // ---------------- 实例图标 ----------------
@@ -175,7 +177,7 @@ interface MslxApi {
     @GET("api/instance/icon/{id}.png")
     suspend fun instanceIcon(@Path("id") id: Long): retrofit2.Response<okhttp3.ResponseBody>
 
-    /** 图标插件（mslx-icon）端点：Daemon 侧本地 → 磁盘缓存 → 第三方查询三级回退。 */
-    @GET("api/plugins/icon/server/{id}")
+    /** 图标插件端点：Daemon 侧本地 → 磁盘缓存 → 第三方查询三级回退。 */
+    @GET("$THIRD_PARTY_ANDROID_ADDONS_ROUTE/icon/server/{id}")
     suspend fun pluginServerIcon(@Path("id") id: Long): retrofit2.Response<okhttp3.ResponseBody>
 }

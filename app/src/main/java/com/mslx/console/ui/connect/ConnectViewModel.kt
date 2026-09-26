@@ -165,7 +165,7 @@ class ConnectViewModel(
         }
     }
 
-    // ---------------- 扫码配对（MSLX Android 扩展插件，沿用兼容接口） ----------------
+    // ---------------- 扫码配对（mslx-plugin-thirdparty-android-addons） ----------------
 
     /**
      * 处理扫码结果：解析 `mslxp1:` 载荷 → 调用插件 redeem 端点兑换一次性受限 API Key →
