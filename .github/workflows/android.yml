@@ -38,7 +38,11 @@ jobs:
             exit 0
           fi
           git remote add cnb "https://cnb:${CNB_TOKEN}@cnb.cool/WLudy/MSLX_APP-Android.git"
-          git push cnb "HEAD:refs/heads/main"
+          # CNB 可能保留了上一次镜像生成的不同提交对象，普通 push 会被非快进保护拒绝。
+          # 先读取远端期望值，再强制对齐 GitHub main；若期间发生新的 CNB 改动，lease 会保护它。
+          git fetch cnb refs/heads/main:refs/remotes/cnb/main --quiet
+          CNB_MAIN=$(git rev-parse refs/remotes/cnb/main)
+          git push cnb "HEAD:refs/heads/main" --force-with-lease="refs/heads/main:${CNB_MAIN}"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
