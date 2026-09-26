@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -28,8 +27,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +41,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,6 +60,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import com.mslx.console.data.model.UserInfo
+import com.mslx.console.ui.MslxCard
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -83,6 +82,7 @@ fun UserCenterScreen(
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
@@ -91,6 +91,10 @@ fun UserCenterScreen(
                         Text("用户中心", modifier = Modifier.padding(start = 10.dp))
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                ),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -135,8 +139,8 @@ fun UserCenterScreen(
                     val isSystemUser = user.isSystemUser
                     LazyColumn(
                         modifier = contentModifier,
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                         contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
                         item {
                             ProfileCard(user = user, onEdit = { showSelfEditor = true }, canEdit = !isSystemUser)
@@ -145,7 +149,7 @@ fun UserCenterScreen(
                             Text("账号安全", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         }
                         item {
-                            Card(shape = RoundedCornerShape(12.dp)) {
+                            MslxCard {
                                 val clipboard = LocalClipboardManager.current
                                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("API Key", style = MaterialTheme.typography.labelLarge)
@@ -286,9 +290,8 @@ private fun LetteredAvatar(initial: String, dimen: androidx.compose.ui.unit.Dp) 
 
 @Composable
 private fun ProfileCard(user: UserInfo, onEdit: () -> Unit, canEdit: Boolean) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+    MslxCard(
+        highlighted = true,
     ) {
         Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             if (!user.avatar.isNullOrBlank()) {
@@ -320,7 +323,7 @@ private fun ProfileCard(user: UserInfo, onEdit: () -> Unit, canEdit: Boolean) {
 
 @Composable
 private fun ManagedUserCard(user: UserInfo, currentUserId: String?, onEdit: () -> Unit, onDelete: () -> Unit) {
-    Card(shape = RoundedCornerShape(12.dp)) {
+    MslxCard {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(user.name ?: user.username ?: "未知用户", fontWeight = FontWeight.SemiBold)

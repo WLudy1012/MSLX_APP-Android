@@ -6,8 +6,32 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// 使用 Material3 默认排版，仅补充控制台等宽字体。
-val Typography = Typography()
+val Typography = Typography().copy(
+    displaySmall = Typography().displaySmall.copy(
+        fontWeight = FontWeight.Bold,
+        letterSpacing = (-0.4).sp,
+    ),
+    headlineSmall = Typography().headlineSmall.copy(
+        fontWeight = FontWeight.Bold,
+        letterSpacing = (-0.2).sp,
+    ),
+    titleLarge = Typography().titleLarge.copy(
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = (-0.1).sp,
+    ),
+    titleMedium = Typography().titleMedium.copy(
+        fontWeight = FontWeight.Medium,
+    ),
+    bodyLarge = Typography().bodyLarge.copy(
+        lineHeight = 24.sp,
+    ),
+    bodyMedium = Typography().bodyMedium.copy(
+        lineHeight = 21.sp,
+    ),
+    labelLarge = Typography().labelLarge.copy(
+        fontWeight = FontWeight.SemiBold,
+    ),
+)
 
 val ConsoleFont = FontFamily.Monospace
 

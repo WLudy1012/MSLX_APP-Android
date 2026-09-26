@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -39,8 +38,6 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -57,6 +54,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -76,6 +74,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.ServerRef
 import com.mslx.console.data.localengine.InstanceStorage
 import com.mslx.console.data.localengine.LocalStorage
+import com.mslx.console.ui.MslxCard
 import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -135,7 +134,15 @@ fun CreateInstanceScreen(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = { TopAppBar(title = { Text("新建实例", fontWeight = FontWeight.Bold) }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("新建实例", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                ),
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Box(
@@ -307,7 +314,7 @@ private fun FormContent(
     val isLocal = state.target == "local"
     // 本机目标仅支持 Java 核心：只保留快速/自定义
     val visibleModes = if (isLocal) MODES.filter { (v, _) -> v == 1 || v == 10 } else MODES
-    Column(modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column(modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
         // 创建目标：Daemon / 本机
         Text("创建目标", style = MaterialTheme.typography.labelLarge)
         Spacer(Modifier.height(6.dp))
@@ -845,7 +852,7 @@ private fun UploadRow(
 
 @Composable
 private fun SelectedCoreCard(core: String, onClear: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+    MslxCard(highlighted = true) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(core, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
             IconButton(onClick = onClear) { Icon(Icons.Filled.Delete, "移除") }
@@ -915,7 +922,7 @@ private fun formatMemory(valueMb: Int, unit: String): String {
 
 @Composable
 private fun SectionCard(title: String, content: @Composable () -> Unit) {
-    Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))) {
+    MslxCard {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(10.dp))

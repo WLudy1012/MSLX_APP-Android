@@ -132,7 +132,7 @@ fun GlassBackground(
 @Composable
 fun GlassSurface(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(20.dp),
+    shape: Shape = RoundedCornerShape(22.dp),
     alpha: Float = LocalGlassAlpha.current,
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -141,8 +141,8 @@ fun GlassSurface(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(scheme.surface.copy(alpha = alpha.coerceIn(0f, 1f)))
-            .border(1.dp, scheme.outlineVariant.copy(alpha = 0.45f), shape),
+            .background(scheme.surface.copy(alpha = (alpha * 0.92f).coerceIn(0f, 1f)))
+            .border(1.dp, scheme.outlineVariant.copy(alpha = 0.58f), shape),
     ) {
         if (level == GlassLevel.FULL) {
             Box(
@@ -161,7 +161,7 @@ fun GlassSurface(
 }
 
 /** 背景图描边圆角（与面板一致的视觉语言可用）。 */
-val GlassCardShape = RoundedCornerShape(20.dp)
+val GlassCardShape = RoundedCornerShape(22.dp)
 
 /** 面板描边宽度。 */
 val GlassBorderWidth: Dp = 1.dp

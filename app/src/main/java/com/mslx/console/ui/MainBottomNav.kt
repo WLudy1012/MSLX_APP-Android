@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -54,15 +55,16 @@ fun MainBottomNav(
     current: TopPage,
     onNavigate: (TopPage) -> Unit,
 ) {
-    val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    val shape = RoundedCornerShape(28.dp)
     NavigationBar(
         modifier = Modifier
+            .padding(horizontal = 10.dp, vertical = 8.dp)
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f), shape),
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f), shape),
         containerColor = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        tonalElevation = 4.dp,
+        tonalElevation = 0.dp,
         windowInsets = NavigationBarDefaults.windowInsets,
     ) {
         TopPage.entries.forEach { page ->
@@ -113,7 +115,7 @@ private fun RowScope.DockItem(
 
     Box(
         modifier = Modifier
-            .height(64.dp)
+            .height(68.dp)
             .weight(1f)
             // indication=null：不绘制默认 ripple 矩形框，按压反馈走图标缩放/变淡
             .clickable(
@@ -131,7 +133,7 @@ private fun RowScope.DockItem(
                         .size(width = 56.dp, height = 30.dp)
                         .graphicsLayer { alpha = indicatorAlpha }
                         .clip(RoundedCornerShape(15.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)),
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)),
                 )
                 Icon(
                     imageVector = page.icon,

@@ -43,6 +43,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,6 +65,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mslx.console.data.ManagedServer
 import com.mslx.console.data.ServerRef
 import com.mslx.console.ui.statusColor
+import com.mslx.console.ui.MslxCard
 import com.mslx.console.ui.theme.GlassSurface
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -106,6 +108,10 @@ fun HomeScreen(
         topBar = {
             TopAppBar(
                 title = { Text("主页", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                ),
                 actions = {
                     IconButton(onClick = viewModel::refresh, enabled = !state.refreshing) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新")
@@ -123,9 +129,24 @@ fun HomeScreen(
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 30.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
+                item {
+                    Column(Modifier.padding(horizontal = 2.dp)) {
+                        Text(
+                            text = "MSLX 控制台",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            text = "一眼掌握服务端与实例状态",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 item {
                     DaemonPagerSection(
                         state = state,
@@ -340,8 +361,8 @@ private fun DaemonCard(
     onEdit: () -> Unit,
     onOpenInstances: () -> Unit,
 ) {
-    GlassSurface(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 8.dp)) {
+    GlassSurface(shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 14.dp, top = 16.dp, bottom = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OnlineDot(page.online)
                 Spacer(Modifier.width(8.dp))
@@ -488,16 +509,9 @@ private fun ServerRow(
     modifier: Modifier = Modifier,
 ) {
     val statusCode = server.status
-    Card(
+    MslxCard(
         onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (highlighted) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-            },
-        ),
+        highlighted = highlighted,
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
@@ -572,9 +586,8 @@ private fun ServerRow(
 
 @Composable
 private fun EmptyServersCard(state: HomeUiState, onOpenInstances: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+    MslxCard(
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
@@ -612,9 +625,8 @@ private fun OnlineDot(online: Boolean?) {
 /** 每日一言卡：加载失败时展示兜底文案（不崩溃、不空白）。 */
 @Composable
 private fun QuoteCard(state: HomeUiState) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+    MslxCard(
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text("每日一言", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -686,10 +698,9 @@ private fun NotificationRow(notification: ServerNotification, onClick: () -> Uni
     val timeText = remember(notification.time) {
         SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(notification.time))
     }
-    Card(
+    MslxCard(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(

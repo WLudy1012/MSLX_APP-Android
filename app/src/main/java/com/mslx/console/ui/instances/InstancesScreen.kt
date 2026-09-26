@@ -18,20 +18,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +37,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,6 +63,8 @@ import com.mslx.console.data.ServerRef
 import com.mslx.console.data.isStoppableStatus
 import com.mslx.console.ui.StatusBadge
 import com.mslx.console.ui.StatusDot
+import com.mslx.console.ui.MslxCard
+import com.mslx.console.ui.MslxEmptyState
 import com.mslx.console.ui.statusColor
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -102,6 +103,10 @@ fun InstancesScreen(
         topBar = {
             TopAppBar(
                 title = { Text("实例列表", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                ),
                 actions = {
                     // 一键停止全部：逐个按实例归属下发，不再依赖“主连接”
                     val hasStoppable = state.servers.any { isStoppableStatus(it.status) }
@@ -126,57 +131,25 @@ fun InstancesScreen(
                 }
 
                 state.error != null && state.servers.isEmpty() -> {
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        EmptyIcon()
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            text = "加载失败",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = state.error.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        FilledTonalButton(onClick = { viewModel.refresh(initial = true) }) {
-                            Text("重试")
-                        }
-                    }
+                    MslxEmptyState(
+                        icon = Icons.Filled.Info,
+                        title = "加载失败",
+                        description = state.error.orEmpty(),
+                        actionLabel = "重试",
+                        onAction = { viewModel.refresh(initial = true) },
+                        modifier = Modifier.align(Alignment.Center),
+                    )
                 }
 
                 state.servers.isEmpty() -> {
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        EmptyIcon()
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            text = "暂无实例",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "点「新建」创建云端或本机实例（本机实例直接在手机上开服）",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        FilledTonalButton(onClick = onOpenNewInstance) {
-                            Text("新建实例")
-                        }
-                    }
+                    MslxEmptyState(
+                        icon = Icons.Filled.Info,
+                        title = "暂无实例",
+                        description = "点「新建」创建云端或本机实例（本机实例直接在手机上开服）",
+                        actionLabel = "新建实例",
+                        onAction = onOpenNewInstance,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
                 }
 
                 else -> {
@@ -188,9 +161,9 @@ fun InstancesScreen(
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(
-                                start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp,
+                                start = 20.dp, end = 20.dp, top = 10.dp, bottom = 30.dp,
                             ),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
                             items(state.servers, key = { it.key }) { server ->
                                 InstanceCard(
@@ -246,24 +219,6 @@ fun InstancesScreen(
 }
 
 @Composable
-private fun EmptyIcon() {
-    Box(
-        modifier = Modifier
-            .size(72.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.outlineVariant),
-        )
-    }
-}
-
-@Composable
 private fun InstanceCard(
     server: ManagedServer,
     icon: Bitmap?,
@@ -274,18 +229,15 @@ private fun InstanceCard(
     modifier: Modifier = Modifier,
 ) {
     val statusCode = server.status
-    Card(
+    MslxCard(
         onClick = onClick,
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        ),
+        highlighted = server.running,
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 14.dp),
+                .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // 图标（有则显示，无则回退状态色块）
