@@ -275,7 +275,10 @@ object ApiClient {
      * 由调用方回退到异常自身文案。
      */
     fun errorMessageFrom(throwable: Throwable): String? {
-        val http = throwable as? retrofit2.HttpException ?: return null
+        val http = generateSequence(throwable) { it.cause }
+            .filterIsInstance<retrofit2.HttpException>()
+            .firstOrNull()
+            ?: return null
         val body = runCatching { http.response()?.errorBody()?.string() }.getOrNull()
         if (body.isNullOrBlank()) return null
         val message = runCatching {

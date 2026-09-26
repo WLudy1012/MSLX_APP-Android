@@ -196,8 +196,8 @@ fun UserCenterScreen(
             user = state.user!!,
             saving = state.saving,
             onDismiss = { showSelfEditor = false },
-            onSave = { username, name, avatar, password, reset ->
-                viewModel.updateSelf(username, name, avatar, password, reset)
+            onSave = { username, name, avatar, oldPassword, password, reset ->
+                viewModel.updateSelf(username, name, avatar, oldPassword, password, reset)
                 showSelfEditor = false
             },
         )
@@ -339,11 +339,12 @@ private fun SelfEditorDialog(
     user: UserInfo,
     saving: Boolean,
     onDismiss: () -> Unit,
-    onSave: (String, String, String, String, Boolean) -> Unit,
+    onSave: (String, String, String, String, String, Boolean) -> Unit,
 ) {
     var username by remember { mutableStateOf(user.username.orEmpty()) }
     var name by remember { mutableStateOf(user.name.orEmpty()) }
     var avatar by remember { mutableStateOf(user.avatar.orEmpty()) }
+    var oldPassword by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var resetApiKey by remember { mutableStateOf(false) }
     AlertDialog(
@@ -354,6 +355,14 @@ private fun SelfEditorDialog(
                 OutlinedTextField(username, { username = it }, label = { Text("用户名") }, singleLine = true)
                 OutlinedTextField(name, { name = it }, label = { Text("显示名称") }, singleLine = true)
                 OutlinedTextField(avatar, { avatar = it }, label = { Text("头像 URL") }, singleLine = true)
+                OutlinedTextField(
+                    value = oldPassword,
+                    onValueChange = { oldPassword = it },
+                    label = { Text("当前密码（修改密码时必填）") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    isError = password.isNotBlank() && oldPassword.isBlank(),
+                )
                 OutlinedTextField(password, { password = it }, label = { Text("新密码（可选）") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(resetApiKey, { resetApiKey = it })
@@ -361,7 +370,12 @@ private fun SelfEditorDialog(
                 }
             }
         },
-        confirmButton = { TextButton(enabled = !saving, onClick = { onSave(username, name, avatar, password, resetApiKey) }) { Text("保存") } },
+        confirmButton = {
+            TextButton(
+                enabled = !saving && (password.isBlank() || oldPassword.isNotBlank()),
+                onClick = { onSave(username, name, avatar, oldPassword, password, resetApiKey) },
+            ) { Text("保存") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }

@@ -942,11 +942,11 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    fun cancelCreation() {
+    fun cancelCreation(cleanupFiles: Boolean = false) {
         val serverId = _state.value.createdServerId
         if (serverId.isBlank()) return
         viewModelScope.launch {
-            repository.cancelCreation(serverId).fold(
+            repository.cancelCreation(serverId, cleanupFiles).fold(
                 onSuccess = { _message.tryEmit(it) },
                 onFailure = { e -> _message.tryEmit("取消失败：${e.message}") },
             )

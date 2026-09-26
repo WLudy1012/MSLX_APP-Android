@@ -97,6 +97,7 @@ data class UpdateSelfRequest(
     @SerializedName("username") val username: String? = null,
     @SerializedName("name") val name: String? = null,
     @SerializedName("avatar") val avatar: String? = null,
+    @SerializedName("oldPassword") val oldPassword: String? = null,
     @SerializedName("password") val password: String? = null,
     @SerializedName("resetApiKey") val resetApiKey: Boolean = false,
     @SerializedName("resources") val resources: List<String>? = null,

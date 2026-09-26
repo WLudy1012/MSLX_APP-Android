@@ -76,7 +76,18 @@ class InstanceRepository {
     private fun requireApi(): MslxApi =
         api ?: throw IllegalStateException("尚未配置连接信息")
 
-    suspend fun verify(): Result<Unit> = runCatching {
+    private suspend fun <T> daemonResult(block: suspend () -> T): Result<T> = runCatching {
+        try {
+            block()
+        } catch (e: HttpException) {
+            throw IllegalStateException(
+                ApiClient.errorMessageFrom(e) ?: "HTTP ${e.code()} 请求失败",
+                e,
+            )
+        }
+    }
+
+    suspend fun verify(): Result<Unit> = daemonResult {
         try {
             val resp = requireApi().status()
             if (resp.code != 200) {
@@ -94,13 +105,13 @@ class InstanceRepository {
         }
     }
 
-    suspend fun getStatus(): Result<StatusData> = runCatching {
+    suspend fun getStatus(): Result<StatusData> = daemonResult {
         val resp = requireApi().status()
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取状态失败")
         resp.data ?: throw IllegalStateException("返回数据为空")
     }
 
-    suspend fun javaList(refresh: Boolean = false): Result<List<LocalJava>> = runCatching {
+    suspend fun javaList(refresh: Boolean = false): Result<List<LocalJava>> = daemonResult {
         val resp = requireApi().javaList(refresh)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取 Java 列表失败")
         resp.data ?: emptyList()
@@ -137,26 +148,26 @@ class InstanceRepository {
         .distinct()
         .sortedWith(compareByDescending { it.toIntOrNull() ?: 0 })
 
-    suspend fun listInstances(): Result<List<InstanceSummary>> = runCatching {
+    suspend fun listInstances(): Result<List<InstanceSummary>> = daemonResult {
         val resp = requireApi().instanceList()
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取实例列表失败")
         resp.data ?: emptyList()
     }
 
-    suspend fun instanceInfo(id: Long): Result<InstanceInfo> = runCatching {
+    suspend fun instanceInfo(id: Long): Result<InstanceInfo> = daemonResult {
         val resp = requireApi().instanceInfo(id)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取实例信息失败")
         resp.data ?: throw IllegalStateException("返回数据为空")
     }
 
-    suspend fun createInstance(request: CreateServerRequest): Result<String> = runCatching {
+    suspend fun createInstance(request: CreateServerRequest): Result<String> = daemonResult {
         val resp = requireApi().createServer(request)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "创建失败")
         resp.data?.serverId?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("服务器未返回 ServerId")
     }
 
-    suspend fun deleteInstance(id: Long, deleteFiles: Boolean): Result<String> = runCatching {
+    suspend fun deleteInstance(id: Long, deleteFiles: Boolean): Result<String> = daemonResult {
         AppLogger.i("Repository", "删除实例 id=$id deleteFiles=$deleteFiles")
         val resp = requireApi().deleteInstance(DeleteServerRequest(id, deleteFiles))
         if (resp.code != 200) {
@@ -167,13 +178,13 @@ class InstanceRepository {
         resp.message ?: "实例已删除"
     }
 
-    suspend fun cancelCreation(serverId: String): Result<String> = runCatching {
-        val resp = requireApi().cancelCreation(CancelCreationRequest(serverId))
+    suspend fun cancelCreation(serverId: String, cleanupFiles: Boolean = false): Result<String> = daemonResult {
+        val resp = requireApi().cancelCreation(CancelCreationRequest(serverId, cleanupFiles))
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "取消失败")
         resp.message ?: "取消信号已发送"
     }
 
-    suspend fun deleteUpload(uploadId: String): Result<Unit> = runCatching {
+    suspend fun deleteUpload(uploadId: String): Result<Unit> = daemonResult {
         requireApi().deleteUpload(uploadId)
     }
 
@@ -269,19 +280,19 @@ class InstanceRepository {
         response.data ?: throw IllegalStateException("返回下载信息为空")
     }
 
-    suspend fun sendAction(id: Long, action: String): Result<String> = runCatching {
+    suspend fun sendAction(id: Long, action: String): Result<String> = daemonResult {
         val resp = requireApi().action(ActionRequest(id, action))
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "操作失败")
         resp.message ?: "操作成功"
     }
 
-    suspend fun getSettings(id: Long): Result<ServerSettings> = runCatching {
+    suspend fun getSettings(id: Long): Result<ServerSettings> = daemonResult {
         val resp = requireApi().instanceSettings(id)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取设置失败")
         resp.data ?: throw IllegalStateException("返回数据为空")
     }
 
-    suspend fun updateSettings(id: Long, settings: ServerSettings): Result<Pair<String, Boolean>> = runCatching {
+    suspend fun updateSettings(id: Long, settings: ServerSettings): Result<Pair<String, Boolean>> = daemonResult {
         val normalized = settings.copy(java = normalizeJavaConfig(settings.java))
         val resp = requireApi().updateInstanceSettings(id, normalized)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "保存失败")
@@ -297,43 +308,43 @@ class InstanceRepository {
         }
     }
 
-    suspend fun updateSelf(body: UpdateSelfRequest): Result<String> = runCatching {
+    suspend fun updateSelf(body: UpdateSelfRequest): Result<String> = daemonResult {
         val resp = requireApi().updateSelf(body)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "更新用户信息失败")
         resp.message ?: "更新成功"
     }
 
-    suspend fun adminUserList(): Result<List<UserInfo>> = runCatching {
+    suspend fun adminUserList(): Result<List<UserInfo>> = daemonResult {
         val resp = requireApi().adminUserList()
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取用户列表失败")
         resp.data.orEmpty()
     }
 
-    suspend fun adminCreateUser(body: AdminCreateUserRequest): Result<String> = runCatching {
+    suspend fun adminCreateUser(body: AdminCreateUserRequest): Result<String> = daemonResult {
         val resp = requireApi().adminCreateUser(body)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "创建用户失败")
         resp.message ?: "创建成功"
     }
 
-    suspend fun adminUpdateUser(id: String, body: AdminUpdateUserRequest): Result<String> = runCatching {
+    suspend fun adminUpdateUser(id: String, body: AdminUpdateUserRequest): Result<String> = daemonResult {
         val resp = requireApi().adminUpdateUser(id, body)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "更新用户失败")
         resp.message ?: "更新成功"
     }
 
-    suspend fun adminDeleteUser(id: String): Result<String> = runCatching {
+    suspend fun adminDeleteUser(id: String): Result<String> = daemonResult {
         val resp = requireApi().adminDeleteUser(id)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "删除用户失败")
         resp.message ?: "删除成功"
     }
 
-    suspend fun frpList(): Result<List<FrpSummary>> = runCatching {
+    suspend fun frpList(): Result<List<FrpSummary>> = daemonResult {
         val resp = requireApi().frpList()
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取 FRP 列表失败")
         resp.data.orEmpty()
     }
 
-    suspend fun pmList(id: Long, mode: String): Result<PmListData> = runCatching {
+    suspend fun pmList(id: Long, mode: String): Result<PmListData> = daemonResult {
         val resp = requireApi().pmList(id, mode)
         val body = resp.body()
         when {
@@ -345,44 +356,44 @@ class InstanceRepository {
         }
     }
 
-    suspend fun pmSet(id: Long, mode: String, action: String, targets: List<String>): Result<String> = runCatching {
+    suspend fun pmSet(id: Long, mode: String, action: String, targets: List<String>): Result<String> = daemonResult {
         val resp = requireApi().pmSet(id, PmSetRequest(mode, action, targets))
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "操作失败")
         resp.message ?: "操作成功"
     }
 
-    suspend fun fileContent(id: Long, path: String): Result<String> = runCatching {
+    suspend fun fileContent(id: Long, path: String): Result<String> = daemonResult {
         val resp = requireApi().fileContent(id, path)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "读取失败")
         resp.data ?: throw IllegalStateException("返回数据为空")
     }
 
     /** 列出实例目录下的文件/子目录（path 为空表示实例根目录）。 */
-    suspend fun fileList(id: Long, path: String = ""): Result<List<FileItem>> = runCatching {
+    suspend fun fileList(id: Long, path: String = ""): Result<List<FileItem>> = daemonResult {
         val resp = requireApi().fileList(id, path)
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取文件列表失败")
         resp.data.orEmpty()
     }
 
-    suspend fun saveFileContent(id: Long, path: String, content: String): Result<String> = runCatching {
+    suspend fun saveFileContent(id: Long, path: String, content: String): Result<String> = daemonResult {
         val resp = requireApi().saveFileContent(id, SaveFileRequest(path, content))
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "保存失败")
         resp.message ?: "保存成功"
     }
 
-    suspend fun userMe(): Result<UserInfo> = runCatching {
+    suspend fun userMe(): Result<UserInfo> = daemonResult {
         val resp = requireApi().userMe()
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取用户信息失败")
         resp.data ?: throw IllegalStateException("返回数据为空")
     }
 
-    suspend fun uploadInit(): Result<String> = runCatching {
+    suspend fun uploadInit(): Result<String> = daemonResult {
         val resp = requireApi().uploadInit()
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "初始化上传失败")
         resp.data?.uploadId ?: throw IllegalStateException("未返回 uploadId")
     }
 
-    suspend fun uploadChunk(uploadId: String, index: Int, bytes: ByteArray): Result<Unit> = runCatching {
+    suspend fun uploadChunk(uploadId: String, index: Int, bytes: ByteArray): Result<Unit> = daemonResult {
         val part = MultipartBody.Part.createFormData(
             "file",
             "chunk_$index",
@@ -392,13 +403,13 @@ class InstanceRepository {
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "上传分片失败")
     }
 
-    suspend fun uploadFinish(uploadId: String, totalChunks: Int): Result<String> = runCatching {
+    suspend fun uploadFinish(uploadId: String, totalChunks: Int): Result<String> = daemonResult {
         val resp = requireApi().uploadFinish(uploadId, UploadFinishRequest(totalChunks))
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "合并分片失败")
         resp.message ?: "上传成功"
     }
 
-    suspend fun saveUpload(id: Long, uploadId: String, fileName: String, currentPath: String): Result<String> = runCatching {
+    suspend fun saveUpload(id: Long, uploadId: String, fileName: String, currentPath: String): Result<String> = daemonResult {
         val resp = requireApi().saveUpload(id, SaveUploadRequest(uploadId, fileName, currentPath))
         if (resp.code != 200) throw IllegalStateException(resp.message ?: "保存文件失败")
         resp.message ?: "保存成功"

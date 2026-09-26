@@ -39,6 +39,7 @@ data class CreateServerData(
 /** POST /api/instance/cancelCreation 请求体。 */
 data class CancelCreationRequest(
     @SerializedName("serverId") val serverId: String,
+    @SerializedName("cleanupFiles") val cleanupFiles: Boolean = false,
 )
 
 /** MSLAPI v4 /mirrors 分类数据。 */

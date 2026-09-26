@@ -105,10 +105,15 @@ class UserCenterViewModel(application: Application) : AndroidViewModel(applicati
         username: String,
         name: String,
         avatar: String,
+        oldPassword: String,
         password: String,
         resetApiKey: Boolean,
     ) {
         if (_state.value.saving) return
+        if (password.isNotBlank() && oldPassword.isBlank()) {
+            _message.tryEmit("修改密码时必须填写当前密码")
+            return
+        }
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
             repository.updateSelf(
@@ -116,6 +121,7 @@ class UserCenterViewModel(application: Application) : AndroidViewModel(applicati
                     username = username.trim().ifBlank { null },
                     name = name.trim().ifBlank { null },
                     avatar = avatar.trim().ifBlank { null },
+                    oldPassword = oldPassword.ifBlank { null },
                     password = password.ifBlank { null },
                     resetApiKey = resetApiKey,
                 ),
@@ -126,7 +132,7 @@ class UserCenterViewModel(application: Application) : AndroidViewModel(applicati
                     load()
                 },
                 onFailure = { e ->
-                    _message.emit("更新失败：${e.message ?: "未知错误"}")
+                    _message.emit("更新失败：${com.mslx.console.data.remote.ApiClient.errorMessageFrom(e) ?: e.message ?: "未知错误"}")
                     _state.update { it.copy(saving = false) }
                 },
             )

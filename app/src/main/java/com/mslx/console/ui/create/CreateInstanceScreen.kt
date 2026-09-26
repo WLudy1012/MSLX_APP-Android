@@ -96,6 +96,7 @@ fun CreateInstanceScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var showCancelDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.message.collect { snackbarHostState.showSnackbar(it) }
@@ -173,7 +174,7 @@ fun CreateInstanceScreen(
                     serverId = state.createdServerId,
                     progress = state.creationProgress,
                     logs = state.creationLogs,
-                    onCancel = viewModel::cancelCreation,
+                    onCancel = { showCancelDialog = true },
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -213,6 +214,35 @@ fun CreateInstanceScreen(
             },
             onUsePrivate = viewModel::dismissWithPrivateStorage,
             onDismiss = viewModel::dismissWithPrivateStorage,
+        )
+    }
+
+    if (showCancelDialog && state.creating) {
+        var cleanupFiles by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { showCancelDialog = false },
+            title = { Text("取消创建") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("确定取消当前实例创建任务吗？")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(
+                            checked = cleanupFiles,
+                            onCheckedChange = { cleanupFiles = it },
+                        )
+                        Text("同时清理已经部署的文件")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCancelDialog = false
+                    viewModel.cancelCreation(cleanupFiles)
+                }) { Text("确认取消") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelDialog = false }) { Text("继续创建") }
+            },
         )
     }
 
