@@ -1,4 +1,4 @@
-name: Android CI
+name: Android 持续集成
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build
+    name: 构建 Android 应用
     runs-on: ubuntu-latest
     env:
       # ubuntu runner 自带 SDK 的固定路径；缓存 NDK 等组件时需要以 env 形式引用
@@ -19,7 +19,7 @@ jobs:
       MSLX_MAVEN_GOOGLE_MIRROR: https://maven.aliyun.com/repository/google
       MSLX_MAVEN_CENTRAL_MIRROR: https://maven.aliyun.com/repository/public
     steps:
-      - name: Checkout
+      - name: 检出代码
         uses: actions/checkout@v4
         with:
           # 生成 dev 构建说明与 Actions 版本号时需要 tag 与提交信息
@@ -27,7 +27,7 @@ jobs:
           # 必须显式取 tag：git describe --tags 依赖它算 Actions 四段版本号
           fetch-tags: true
 
-      - name: Sync main source to CNB
+      - name: 同步 main 源码到 CNB
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
@@ -44,7 +44,7 @@ jobs:
           CNB_MAIN=$(git rev-parse refs/remotes/cnb/main)
           git push cnb "HEAD:refs/heads/main" --force-with-lease="refs/heads/main:${CNB_MAIN}"
 
-      - name: Set up JDK 17
+      - name: 配置 JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -55,7 +55,7 @@ jobs:
       # 注意：Gradle 依赖缓存（~/.gradle）由下面的 gradle/actions/setup-gradle 负责
       #（其内部就是基于 actions/cache 的官方实现），这里不要重复缓存 ~/.gradle，
       # 否则两套缓存系统还原到同一目录会互相覆盖。
-      - name: Cache Android SDK (NDK / platform / build-tools)
+      - name: 缓存 Android SDK（NDK / 平台 / 构建工具）
         uses: actions/cache@v4
         with:
           path: |
@@ -72,7 +72,7 @@ jobs:
       # runner 镜像换成 cmdline-tools 16.0 后这一步必然失败（v1.6.6-Beta 起 Release/CI 全挂）。
       # ubuntu 运行器自带 Android SDK（ANDROID_HOME）且许可已在镜像内接受，AGP 会按需补齐
       # 缺失的 platform / build-tools，所以下面只做容错预热，任何失败都不阻断构建。
-      - name: Set up Android SDK
+      - name: 配置 Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           SDKMAN=""
@@ -87,12 +87,12 @@ jobs:
           "$SDKMAN" "platforms;android-35" "build-tools;35.0.0" platform-tools \
             || echo "::warning::sdkmanager 预装未完全成功，交由 AGP 自动下载"
 
-      - name: Set up Gradle
+      - name: 配置 Gradle
         uses: gradle/actions/setup-gradle@v4
 
       # 依赖缓存健康检查（非阻断）：缓存完整时依赖解析可零网络通过
       #（即 install 阶段无需联网）；首次构建或依赖有更新时失败，仅提示正式构建会联网补齐。
-      - name: Verify dependency cache (offline dry-run)
+      - name: 验证依赖缓存（离线试运行）
         run: |
           chmod +x gradlew
           if ./gradlew :app:dependencies --offline -q > /dev/null 2>&1; then
@@ -102,7 +102,7 @@ jobs:
           fi
 
       # 本机开服需要内嵌 JRE：归档缺失会让 dev 构建的调试包装不上运行时
-      - name: Verify embedded JRE runtime
+      - name: 验证内嵌 JRE 运行时
         run: |
           set -e
           JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
@@ -115,7 +115,7 @@ jobs:
 
       # 仅 main push 时恢复正式签名密钥：debug 构建用 release 签名，
       # 产出的 Actions 调试 APK 可直接覆盖安装正式版（PR 无 Secrets，走默认 debug 签名）。
-      - name: Restore signing keystore (main only)
+      - name: 恢复签名密钥（仅 main）
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -141,7 +141,7 @@ jobs:
       #   取最近一个 v* tag（去掉 v 与 -Beta/-Force 后缀）作为基准并补齐到三段，
       #   再追加 .$GITHUB_RUN_NUMBER 作为第四段（本仓库累计运行号）。
       #   示例：稳定 v1.15 → 1.15.0.12；beta v1.15.1 → 1.15.1.12。
-      - name: Compute Actions version (main only)
+      - name: 计算 Actions 版本号（仅 main）
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
@@ -159,7 +159,7 @@ jobs:
           echo "ACTIONS_VERSION=${BASE}.${GITHUB_RUN_NUMBER}"
 
       # 无 keystore 时 release 会产出未签名包，仅用于验证可编译性
-      - name: Build debug & release APK
+      - name: 构建 Debug 与 Release APK
         run: |
           chmod +x gradlew
           if [ -n "$ACTIONS_VERSION" ]; then
@@ -168,7 +168,7 @@ jobs:
             ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
           fi
 
-      - name: Upload debug APK
+      - name: 上传 Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
@@ -176,7 +176,7 @@ jobs:
 
       # Actions 更新渠道的数据源：把 main 分支最新 debug APK 发布到 dev Release（覆盖更新）。
       # 注：GitHub Actions 工件 zip 下载需要认证，应用无法直接拉取，故用公开 Release 承载。
-      - name: Publish debug APK to dev release (main only)
+      - name: 发布 Debug APK 到 dev Release（仅 main）
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           SHA=$(sha256sum app/build/outputs/apk/debug/app-debug.apk | awk '{print $1}')
@@ -195,7 +195,7 @@ jobs:
             echo "SHA-256：\`$SHA\`"
           } > dev_release_notes.md
 
-      - name: Upload debug APK to dev release
+      - name: 上传 Debug APK 到 dev Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:

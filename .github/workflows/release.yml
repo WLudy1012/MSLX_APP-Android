@@ -1,4 +1,4 @@
-name: Release
+name: Android 发布
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    name: Build & attach signed APK
+    name: 构建并发布签名 APK
     runs-on: ubuntu-latest
     env:
       # ubuntu runner 自带 SDK 的固定路径；缓存 NDK 等组件时需要以 env 形式引用
@@ -18,7 +18,7 @@ jobs:
       MSLX_MAVEN_GOOGLE_MIRROR: https://maven.aliyun.com/repository/google
       MSLX_MAVEN_CENTRAL_MIRROR: https://maven.aliyun.com/repository/public
     steps:
-      - name: Checkout
+      - name: 检出代码
         uses: actions/checkout@v4
         with:
           # 完整克隆以获取历史提交与 tag
@@ -27,7 +27,7 @@ jobs:
           # release notes 会退化成"把以往所有提交都列出来"
           fetch-tags: true
 
-      - name: Set up JDK 17
+      - name: 配置 JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -37,7 +37,7 @@ jobs:
       # 缓存 miss 时 AGP 会自动下载并在 job 结束时由本 step 回写缓存。
       # 注意：Gradle 依赖缓存（~/.gradle）由下面的 gradle/actions/setup-gradle 负责，
       # 这里不要重复缓存 ~/.gradle，避免两套缓存还原到同一目录互相覆盖。
-      - name: Cache Android SDK (NDK / platform / build-tools)
+      - name: 缓存 Android SDK（NDK / 平台 / 构建工具）
         uses: actions/cache@v4
         with:
           path: |
@@ -54,7 +54,7 @@ jobs:
       # runner 镜像换成 cmdline-tools 16.0 后这一步必然失败（v1.6.6-Beta 起 Release 全挂）。
       # ubuntu 运行器自带 Android SDK（ANDROID_HOME）且许可已在镜像内接受，AGP 会按需补齐
       # 缺失的 platform / build-tools，所以下面只做容错预热，任何失败都不阻断发布。
-      - name: Set up Android SDK
+      - name: 配置 Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           SDKMAN=""
@@ -69,12 +69,12 @@ jobs:
           "$SDKMAN" "platforms;android-35" "build-tools;35.0.0" platform-tools \
             || echo "::warning::sdkmanager 预装未完全成功，交由 AGP 自动下载"
 
-      - name: Set up Gradle
+      - name: 配置 Gradle
         uses: gradle/actions/setup-gradle@v4
 
       # 依赖缓存健康检查（非阻断）：缓存完整时依赖解析可零网络通过；
       # 首次发布或依赖有更新时失败，仅提示正式构建会联网补齐。
-      - name: Verify dependency cache (offline dry-run)
+      - name: 验证依赖缓存（离线试运行）
         run: |
           chmod +x gradlew
           if ./gradlew :app:dependencies --offline -q > /dev/null 2>&1; then
@@ -85,7 +85,7 @@ jobs:
 
       # 本机开服把 Android JRE 内嵌进 APK：仓库内归档必须存在且哈希正确，
       # 否则发布出去的包会退化成"首次开服需联网下载运行时"。
-      - name: Verify embedded JRE runtime
+      - name: 验证内嵌 JRE 运行时
         run: |
           set -e
           JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
@@ -100,7 +100,7 @@ jobs:
       # Java 21/25 运行时不入库、不进 APK，只在发版时从上游
       # 镜像抓一份挂成 Release 附件。GitHub 侧走“尽力而为”：失败只告警不阻断发布
       # （下面 files 对不存在的文件会自动跳过），CNB 流水线那边才是硬校验。
-      - name: Fetch JRE 21 runtime archive
+      - name: 获取 JRE 21 运行时归档
         run: |
           JRE21=jre21-arm64-20260223-release.tar.xz
           SHA=d055fc953771e6cfd2206ef770ca675d69b5e4cfd9f3f1e6820ba5820c3cc1dc
@@ -113,7 +113,7 @@ jobs:
           fi
 
       # 客户端已支持 Java 25；同步发布 GitHub 镜像，避免该下载来源固定返回 404。
-      - name: Fetch JRE 25 runtime archive
+      - name: 获取 JRE 25 运行时归档
         run: |
           JRE25=jre25-arm64-20260223-release.tar.xz
           SHA=0fdf6d19fe66ea61c12caa24bd655227ddb0d7d9c16c0f13281a7c2878635286
@@ -131,7 +131,7 @@ jobs:
       #   KEYSTORE_PASSWORD = 密钥库密码
       #   KEY_ALIAS         = 密钥别名
       #   KEY_PASSWORD      = 密钥密码
-      - name: Restore signing keystore
+      - name: 恢复签名密钥
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -164,13 +164,13 @@ jobs:
       #   app-release.apk      完整版（内嵌 JRE 运行时，可离线开服）
       #   app-release-lite.apk 精简版（不含运行时，体积小；本机开服首次使用需联网下载运行时）
       # 并把 JRE 归档本身作为资产挂上，供精简版在应用内下载（客户端按 CNB → GitHub 顺序尝试）。
-      - name: Build signed release APK (full, embedded JRE)
+      - name: 构建签名 Release APK（完整版，内嵌 JRE）
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
           cp app/build/outputs/apk/release/app-release.apk ./app-release.apk
 
-      - name: Build signed release APK (lite, no JRE)
+      - name: 构建签名 Release APK（精简版，不含 JRE）
         run: |
           ./gradlew assembleRelease -PwithoutJre=true --no-daemon --stacktrace
           cp app/build/outputs/apk/release/app-release.apk ./app-release-lite.apk
@@ -188,7 +188,7 @@ jobs:
       #     release note 包含"直至上一正式版的全部 Beta 更新"）；
       #   - Beta 版：上一版 = 最近一个带 -Beta 后缀的 v* tag（包含中间 Actions 更新）；若无，
       #     回退到最近一个不带 -Beta 的 tag。
-      - name: Generate release notes
+      - name: 生成发布说明
         run: |
           set -e
           CUR_TAG="${GITHUB_REF_NAME:-$(git describe --tags --exact-match)}"
@@ -224,7 +224,7 @@ jobs:
           } > release_notes.md
 
       # 计算两个变体的 SHA256 并写入 release notes，供用户校验文件完整性
-      - name: Compute APK SHA256
+      - name: 计算 APK SHA-256
         run: |
           FULL_SHA=$(sha256sum app-release.apk | awk '{print $1}')
           LITE_SHA=$(sha256sum app-release-lite.apk | awk '{print $1}')
@@ -250,7 +250,7 @@ jobs:
             echo "\`\`\`"
           } >> release_notes.md
 
-      - name: Upload APKs to release
+      - name: 上传 APK 到 Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -262,7 +262,7 @@ jobs:
           body_path: release_notes.md
 
 
-      - name: Sync release tag to CNB
+      - name: 同步 Release 标签到 CNB
         env:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
         run: |

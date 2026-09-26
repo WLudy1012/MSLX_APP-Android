@@ -1,4 +1,4 @@
-name: Auto Issue Review
+name: Issue 自动评审
 
 # 新 issue 打开时用 AI 自动打标签并评论。
 #
@@ -20,24 +20,25 @@ permissions:
 
 jobs:
   review:
+    name: 自动分析 Issue
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: 检出仓库代码
         uses: actions/checkout@v4
         with:
           # AI 会用 git log/blame 查历史，浅克隆只给 1 个提交不够用
           fetch-depth: 100
 
       # Copilot CLI 未预装在 runner 上，需自行安装（官方文档要求近期版本）。
-      - name: Set up Node.js
+      - name: 配置 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Install Copilot CLI
+      - name: 安装 Copilot CLI
         run: npm install -g @github/copilot
 
-      - name: Fetch issue title and body
+      - name: 读取 Issue 标题和正文
         id: issue
         uses: actions/github-script@v7
         with:
@@ -53,7 +54,7 @@ jobs:
 
       # 把评审指令与 issue 内容拼成提示词文件：变量经 env 传入、由 python 组装，
       # 不经过任何 YAML/shell 字符串拼接，标题/正文含方括号、换行、引号等都不受影响。
-      - name: Prepare prompt
+      - name: 准备评审提示词
         env:
           ISSUE_TITLE: ${{ steps.issue.outputs.title }}
           ISSUE_BODY: ${{ steps.issue.outputs.body }}
@@ -73,7 +74,7 @@ jobs:
           PY
           python3 "$RUNNER_TEMP/build_prompt.py"
 
-      - name: Run AI review
+      - name: 运行 AI 评审（GPT-5.4）
         id: ai
         # AI 不可用（无订阅/额度/网络/CLI 故障）时不让 issue 流程变红：
         # 失败仅打 warning，Parse 步骤读不到输出文件时做空值降级。
@@ -86,8 +87,9 @@ jobs:
         run: |
           # 只读授权：读文件/搜索 + 只读 git 历史查询，配合 deny 双保险禁写。
           # 其余需要权限的操作（写文件、其他 shell、网络）在 -p 模式下自动被拒。
-          # 不指定 --model，用 CLI 默认模型（显式传不支持的模型名会直接失败）。
+          # 固定使用 GitHub Copilot CLI 当前文档中的高质量模型，避免默认模型变化影响评审结果。
           copilot -p "$(cat "$RUNNER_TEMP/ai-prompt.txt")" -s --no-ask-user \
+            --model gpt-5.4 \
             --allow-tool='read,shell(git log:*),shell(git show:*),shell(git diff:*),shell(git blame:*)' \
             --deny-tool='write' \
             > "$RUNNER_TEMP/ai-response.txt" 2> "$RUNNER_TEMP/ai-stderr.log" || {
@@ -97,7 +99,7 @@ jobs:
               exit $code
             }
 
-      - name: Parse and apply AI output
+      - name: 解析并应用 AI 评审结果
         uses: actions/github-script@v7
         env:
           AI_RESPONSE_FILE: ${{ runner.temp }}/ai-response.txt
@@ -122,7 +124,7 @@ jobs:
               const match = raw.match(/\{[\s\S]*\}/);
               parsed = JSON.parse(match ? match[0] : raw);
             } catch (e) {
-              core.warning('AI response is not valid JSON, skipping label/comment.');
+              core.warning('AI 评审结果不是有效 JSON，跳过标签和评论。');
               return;
             }
 

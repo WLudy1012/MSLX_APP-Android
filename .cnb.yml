@@ -15,7 +15,7 @@ main:
       stages:
         # 补齐 platform 35 / build-tools 35 / NDK 28.2；已存在时秒过。
         # 必须在这里校验 SDK 本身可用，否则后面只会得到难以定位的 Gradle 报错。
-        - name: warm up android sdk (ndk)
+        - name: 预热 Android SDK（NDK）
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
@@ -50,7 +50,7 @@ main:
               }
               echo "NDK 28.2.13676358 安装完成"
             fi
-        - name: verify embedded jre runtime
+        - name: 验证内嵌 JRE 运行时
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
@@ -59,7 +59,7 @@ main:
             SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
             [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
             echo "$SHA  $JRE" | sha256sum -c -
-        - name: build debug apk
+        - name: 构建 Debug APK
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
@@ -69,7 +69,7 @@ main:
             export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
             chmod +x gradlew
             ./gradlew assembleDebug --no-daemon --stacktrace
-        - name: list debug apk
+        - name: 列出 Debug APK
           script: ls -lh app/build/outputs/apk/debug
 
 $:
@@ -84,7 +84,7 @@ $:
         # 私有密钥仓库文件（用户自建，勿公开）：内含 KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD
         https://cnb.cool/WLudy/MSLX-secrets/-/blob/main/keystore.yml
       stages:
-        - name: warm up android sdk (ndk)
+        - name: 预热 Android SDK（NDK）
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
@@ -119,7 +119,7 @@ $:
               }
               echo "NDK 28.2.13676358 安装完成"
             fi
-        - name: restore signing keystore
+        - name: 恢复签名密钥
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
@@ -137,7 +137,7 @@ $:
             keyPassword=${KEY_PASSWORD}
             EOF
 
-        - name: verify embedded jre runtime
+        - name: 验证内嵌 JRE 运行时
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
@@ -151,7 +151,7 @@ $:
         # 供客户端按「CNB → GitHub → FCL 直链」顺序下载。每个文件都做 SHA-256 校验。
         # 这里故意硬失败：附件列表是静态的，缺文件会让上传步骤整体报错，
         # 早失败比"APK 已签名但附件没传上"更容易发现。
-        - name: fetch optional runtime archives
+        - name: 获取可选运行时归档
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
@@ -200,7 +200,7 @@ $:
         # 同一 Release 发布两个变体：app-release.apk（完整版，内嵌 JRE）与
         # app-release-lite.apk（精简版，不含 JRE）；JRE 归档本身也作为附件，
         # 供精简版在应用内下载（客户端按 CNB → GitHub 顺序尝试）。
-        - name: build signed release apk (full, embedded jre)
+        - name: 构建签名 Release APK（完整版，内嵌 JRE）
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
@@ -213,7 +213,7 @@ $:
             ./gradlew assembleRelease --no-daemon --stacktrace
             cp app/build/outputs/apk/release/app-release.apk ./app-release.apk
 
-        - name: build signed release apk (lite, no jre)
+        - name: 构建签名 Release APK（精简版，不含 JRE）
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
@@ -230,7 +230,7 @@ $:
               echo "ERROR: 精简版不应包含内嵌 JRE" >&2; exit 1
             fi
 
-        - name: prepare release notes
+        - name: 准备发布说明
           script: |
             set -eu
             CUR_TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]' | sort -V | tail -1 || true)
@@ -278,13 +278,13 @@ $:
               echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
             } > CNB_RELEASE.md
 
-        - name: create cnb release
+        - name: 创建 CNB Release
           type: git:release
           options:
             descriptionFromFile: CNB_RELEASE.md
             latest: true
 
-        - name: upload release assets
+        - name: 上传 Release 附件
           image: cnbcool/attachments:latest
           settings:
             attachments:

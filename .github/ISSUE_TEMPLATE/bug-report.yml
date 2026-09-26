@@ -39,3 +39,11 @@ body:
         3. 观察到……
     validations:
       required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: 页面截图
+      description: 请拖拽或粘贴能展示问题的页面截图；涉及多个页面时可以上传多张。
+      placeholder: 请在此处上传页面截图，并补充截图对应的操作说明。
+    validations:
+      required: true
