@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -12,7 +13,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import com.mslx.console.data.ThemeMode
+import kotlin.math.pow
 
 data class ThemeConfig(
     val mode: ThemeMode = ThemeMode.SEED,
@@ -53,52 +56,81 @@ private fun Color.lighten(fraction: Float) = lerp(this, Color.White, fraction.co
 private fun Color.darken(fraction: Float) = lerp(this, Color.Black, fraction.coerceIn(0f, 1f))
 private fun Color.desaturate(fraction: Float) = lerp(this, Color(0xFF808080), fraction.coerceIn(0f, 1f))
 
+private fun Color.relativeLuminance(): Float {
+    fun channel(value: Float): Float = if (value <= 0.03928f) value / 12.92f else {
+        ((value + 0.055f) / 1.055f).toDouble().pow(2.4).toFloat()
+    }
+    return 0.2126f * channel(red) + 0.7152f * channel(green) + 0.0722f * channel(blue)
+}
+
+private fun contrastRatio(first: Color, second: Color): Float {
+    val lighter = maxOf(first.relativeLuminance(), second.relativeLuminance())
+    val darker = minOf(first.relativeLuminance(), second.relativeLuminance())
+    return (lighter + 0.05f) / (darker + 0.05f)
+}
+
+private fun readableOn(background: Color): Color {
+    val darkText = Color(0xFF11140F)
+    return if (contrastRatio(background, Color.White) >= contrastRatio(background, darkText)) {
+        Color.White
+    } else {
+        darkText
+    }
+}
+
 /**
  * 基于种子色生成一套完整、协调的 Material3 配色。
  * 所有容器色 / 表面色都从种子色派生，保证整体和谐统一。
  */
 private fun seedColorScheme(seed: Color, dark: Boolean): ColorScheme {
     return if (dark) {
-        val primary = seed.lighten(0.18f)
+        val primary = seed.lighten(0.24f)
+        val secondary = seed.desaturate(0.42f).lighten(0.22f)
+        val tertiary = seed.lighten(0.36f)
+        val primaryContainer = seed.darken(0.44f)
+        val secondaryContainer = secondary.darken(0.42f)
+        val tertiaryContainer = tertiary.darken(0.38f)
         darkColorScheme(
             primary = primary,
-            onPrimary = seed.darken(0.72f),
-            primaryContainer = seed.darken(0.36f),
-            onPrimaryContainer = seed.lighten(0.88f),
+            onPrimary = readableOn(primary),
+            primaryContainer = primaryContainer,
+            onPrimaryContainer = readableOn(primaryContainer),
             inversePrimary = seed.darken(0.08f),
-            secondary = seed.desaturate(0.35f).lighten(0.16f),
-            onSecondary = seed.darken(0.7f),
-            secondaryContainer = seed.desaturate(0.42f).darken(0.28f),
-            onSecondaryContainer = seed.desaturate(0.2f).lighten(0.86f),
-            tertiary = seed.lighten(0.30f),
-            onTertiary = seed.darken(0.7f),
-            tertiaryContainer = seed.darken(0.24f),
-            onTertiaryContainer = seed.lighten(0.85f),
-            background = seed.darken(0.93f),
-            onBackground = Color(0xFFE1E3E6),
-            surface = seed.darken(0.92f),
-            onSurface = Color(0xFFE1E3E6),
-            surfaceVariant = seed.desaturate(0.42f).darken(0.5f),
-            onSurfaceVariant = seed.lighten(0.62f),
+            secondary = secondary,
+            onSecondary = readableOn(secondary),
+            secondaryContainer = secondaryContainer,
+            onSecondaryContainer = readableOn(secondaryContainer),
+            tertiary = tertiary,
+            onTertiary = readableOn(tertiary),
+            tertiaryContainer = tertiaryContainer,
+            onTertiaryContainer = readableOn(tertiaryContainer),
+            background = Color(0xFF10120F),
+            onBackground = Color(0xFFF1F3EC),
+            surface = Color(0xFF151714),
+            onSurface = Color(0xFFF1F3EC),
+            surfaceVariant = Color(0xFF2B2F29),
+            onSurfaceVariant = Color(0xFFD0D5CA),
             surfaceTint = primary,
-            outline = seed.desaturate(0.5f).lighten(0.45f),
-            outlineVariant = seed.desaturate(0.5f).darken(0.22f),
+            outline = Color(0xFF92998A),
+            outlineVariant = Color(0xFF454B42),
         )
     } else {
+        val secondary = seed.desaturate(0.42f)
+        val tertiary = seed.darken(0.12f)
         lightColorScheme(
             primary = seed,
-            onPrimary = Color.White,
+            onPrimary = readableOn(seed),
             primaryContainer = seed.lighten(0.86f),
-            onPrimaryContainer = seed.darken(0.62f),
+            onPrimaryContainer = readableOn(seed.lighten(0.86f)),
             inversePrimary = seed.lighten(0.36f),
-            secondary = seed.desaturate(0.42f),
-            onSecondary = Color.White,
+            secondary = secondary,
+            onSecondary = readableOn(secondary),
             secondaryContainer = seed.desaturate(0.3f).lighten(0.86f),
-            onSecondaryContainer = seed.desaturate(0.3f).darken(0.55f),
-            tertiary = seed.darken(0.12f),
-            onTertiary = Color.White,
+            onSecondaryContainer = readableOn(seed.desaturate(0.3f).lighten(0.86f)),
+            tertiary = tertiary,
+            onTertiary = readableOn(tertiary),
             tertiaryContainer = seed.lighten(0.7f),
-            onTertiaryContainer = seed.darken(0.52f),
+            onTertiaryContainer = readableOn(seed.lighten(0.7f)),
             background = seed.lighten(0.97f),
             onBackground = Color(0xFF1A1C1E),
             surface = seed.lighten(0.98f),
@@ -111,6 +143,13 @@ private fun seedColorScheme(seed: Color, dark: Boolean): ColorScheme {
         )
     }
 }
+
+private val MSLXShapes = Shapes(
+    small = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+)
 
 @Composable
 fun MSLXConsoleTheme(
@@ -127,5 +166,10 @@ fun MSLXConsoleTheme(
         darkTheme -> seedColorScheme(Color(themeConfig.seedColor), dark = true)
         else -> seedColorScheme(Color(themeConfig.seedColor), dark = false)
     }
-    MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = Typography,
+        shapes = MSLXShapes,
+        content = content,
+    )
 }

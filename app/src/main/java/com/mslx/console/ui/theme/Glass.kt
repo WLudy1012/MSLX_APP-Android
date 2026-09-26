@@ -96,6 +96,15 @@ fun GlassBackground(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
+            // 自定义背景先压暗，避免高亮图片穿透面板后吞掉正文对比度。
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        if (dark) Color.Black.copy(alpha = 0.30f)
+                        else Color.White.copy(alpha = 0.06f),
+                    ),
+            )
         }
         // 3) 全量档额外高光层：左上大范围柔光，增强玻璃质感
         if (level == GlassLevel.FULL && bitmap != null) {

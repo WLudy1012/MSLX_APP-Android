@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -114,7 +117,16 @@ fun AppNavHost(
         TopPage.SETTINGS -> Routes.SETTINGS
     }
 
+    // NavHost 在一次切换完成前仍可能短暂保留上一页；连续点击时只接受第一条请求。
+    val dockNavigationLocked = remember { mutableStateOf(false) }
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    LaunchedEffect(backStackEntry?.destination?.route) {
+        dockNavigationLocked.value = false
+    }
+
     fun navigateTopLevel(route: String) {
+        if (dockNavigationLocked.value || backStackEntry?.destination?.route == route) return
+        dockNavigationLocked.value = true
         navController.navigate(route) {
             // 底部 tab 必须直达其根页面：popUpTo(HOME) 清掉栈里其他 tab 与二级页。
             // 不启用 saveState/restoreState：否则 popUpTo 保存的是“整段栈”
@@ -127,7 +139,6 @@ fun AppNavHost(
 
     // 当前顶层页：底部 Dock 提升到 NavHost 外层，页面切换时 Dock 不再随页面淡出淡入重建，
     // 消除切换闪烁与 Dock 动画被转场截断的问题（Dock 仅顶层四页显示）
-    val backStackEntry by navController.currentBackStackEntryAsState()
     val currentTopPage = when (backStackEntry?.destination?.route) {
         Routes.HOME -> TopPage.HOME
         Routes.INSTANCES -> TopPage.INSTANCES
