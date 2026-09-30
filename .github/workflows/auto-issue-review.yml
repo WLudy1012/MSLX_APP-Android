@@ -29,14 +29,17 @@ jobs:
           # AI 会用 git log/blame 查历史，浅克隆只给 1 个提交不够用
           fetch-depth: 100
 
-      # Copilot CLI 未预装在 runner 上，需自行安装（官方文档要求近期版本）。
+      # 固定 CLI 版本，避免 latest 或 CLI 自动更新改变模型目录。
       - name: 配置 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: 安装 Copilot CLI
-        run: npm install -g @github/copilot
+      - name: 安装 Copilot CLI 1.0.89
+        run: npm install -g @github/copilot@1.0.89
+
+      - name: 核对 Copilot CLI 版本
+        run: copilot --version
 
       - name: 读取 Issue 标题和正文
         id: issue
@@ -74,7 +77,7 @@ jobs:
           PY
           python3 "$RUNNER_TEMP/build_prompt.py"
 
-      - name: 运行 AI 评审（GPT-5.4）
+      - name: 运行 AI 评审（Claude Sonnet 4.5）
         id: ai
         # AI 不可用（无订阅/额度/网络/CLI 故障）时不让 issue 流程变红：
         # 失败仅打 warning，Parse 步骤读不到输出文件时做空值降级。
@@ -87,9 +90,8 @@ jobs:
         run: |
           # 只读授权：读文件/搜索 + 只读 git 历史查询，配合 deny 双保险禁写。
           # 其余需要权限的操作（写文件、其他 shell、网络）在 -p 模式下自动被拒。
-          # 固定使用 GitHub Copilot CLI 当前文档中的高质量模型，避免默认模型变化影响评审结果。
-          copilot -p "$(cat "$RUNNER_TEMP/ai-prompt.txt")" -s --no-ask-user \
-            --model gpt-5.4 \
+          # 1.0.89 默认使用 Claude Sonnet 4.5；关闭自动升级，确保版本与默认模型可复现。
+          copilot --no-auto-update -p "$(cat "$RUNNER_TEMP/ai-prompt.txt")" -s --no-ask-user \
             --allow-tool='read,shell(git log:*),shell(git show:*),shell(git diff:*),shell(git blame:*)' \
             --deny-tool='write' \
             > "$RUNNER_TEMP/ai-response.txt" 2> "$RUNNER_TEMP/ai-stderr.log" || {
