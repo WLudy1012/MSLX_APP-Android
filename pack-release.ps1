@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     MSLX-Android local signed release packer (two variants in one run).
 
@@ -114,7 +114,7 @@ function Publish-Artifact {
     $dist = Join-Path $Root "build\dist"
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
     $shortSha = (git -C $Root rev-parse --short HEAD 2>$null)
-    $base = "MSLX-Console-v$Version"
+    $base = "Rolithax-Launcher-v$Version"
     if ($shortSha) { $base += "-$shortSha" }
     $base += "-$Suffix-signed"
     $out = Join-Path $dist "$base.apk"

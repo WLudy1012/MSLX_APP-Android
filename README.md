@@ -1,4 +1,4 @@
-# MSLX_APP-Android（MSLX 控制台 / Android 端）
+# Rolithax Launcher
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Android CI](https://github.com/WLudy1012/MSLX_APP-Android/actions/workflows/android.yml/badge.svg)](https://github.com/WLudy1012/MSLX_APP-Android/actions/workflows/android.yml)
@@ -7,8 +7,10 @@ MSLX 守护程序（MSLX Daemon）的第三方手机安卓端控制台。基于 
 复刻了 MSLX Desktop 版「连接守护程序 → 管理实例」的核心能力，并针对手机触屏重新设计了操作流程。
 
 > 仓库地址：https://github.com/WLudy1012/MSLX_APP-Android
-> Android applicationId / 包名保持 `com.mslx.console`，未随仓库改名而修改。
+> Android namespace / applicationId：`com.wludy.rolithax.launcher`。更换 applicationId 和签名后，旧版需全新安装；旧数据通过应用内加密导出/导入迁移。
 > 本应用为**第三方项目**，与 MSLTeam 无任何隶属/关联关系，使用前请阅读[免责声明](#免责声明)。
+
+本应用集成 MSLAPI 下载服务：**本服务由MSL开服器提供**。<a href="https://mslmc.cn"><img src="./app/src/main/res/drawable-nodpi/msl_logo.png" alt="MSL 开服器 Logo" width="40"></a> [MSL 官网：https://mslmc.cn](https://mslmc.cn)
 
 ## ✨ 功能
 
@@ -22,7 +24,7 @@ MSLX 守护程序（MSLX Daemon）的第三方手机安卓端控制台。基于 
 - **本机开服**：不依赖 Daemon / Termux，直接在手机上跑 Minecraft Java 版服务端（进程内 JVM，可选 Shizuku 增强为真 java 子进程），实例可放在**公共目录**或应用私有目录，多 Java 运行时、常驻通知保活、控制台交互。详见[本机开服](#-本机开服在手机上开服)。
 - **用户中心**：查看/编辑当前用户信息、一键复制 API Key；管理员可进行用户管理（创建/编辑/删除）。
 - **主页仪表盘**：Daemon CPU / 内存负载监视（SignalR 实时推送）、系统信息、实例概览、开服/关服通知。
-- **软件自动更新**：启动检测 + 设置页手动检查；支持**稳定版 / 测试版（Beta）双更新渠道**与 **Actions 调试构建渠道**（应用内下载安装 CI 最新 debug APK）；强制更新版本不可跳过。
+- **软件自动更新**：启动检测 + 设置页手动检查；支持**稳定版 / 测试版（Beta）双更新渠道**；强制更新版本不可跳过。
 - **全应用运行日志**：设置页可查看 / 复制 / 导出 / 清空日志（1MB 轮转 + 敏感信息脱敏）；崩溃重启后自动弹窗提示提交 GitHub Issue。
 - **外观与关于**：主题颜色（动态取色 / 预设色）、「关于」页展示版本号、最近 Release 更新说明与贡献者，并可查看第三方组件许可与免责声明。
 
@@ -30,7 +32,7 @@ MSLX 守护程序（MSLX Daemon）的第三方手机安卓端控制台。基于 
 
 ```
 app/src/main/java/com/mslx/console/
-├── MSLXApplication.kt        # Application（日志初始化 + 依赖容器）
+├── RolithaxApplication.kt        # Application（日志初始化 + 依赖容器）
 ├── data/                     # 数据层
 │   ├── model/                # 与 Daemon 交互的数据模型
 │   ├── remote/               # Retrofit REST + SignalR Hub 客户端
@@ -148,18 +150,17 @@ SIGABRT）；两者的细节注释在 `app/src/main/cpp/shim/mslxnotag.c` 与 `L
 
 ## 🔄 更新与版本后缀约定
 
-版本号规则（1.3 起）：**正式版 `x.x`**（如 `1.3`）、**Beta 版 `x.x.x`**（如 `1.3.1`）、**Actions 版 `x.x.x.x`**（如 `1.3.0.12`）。
+版本号规则（1.3 起）：**正式版 `x.x`**（如 `1.3`）、**Beta 版 `x.x.x`**（如 `1.3.1`）。
 
 - **稳定版**：tag 无后缀（如 `v1.3`）。
 - **测试版**：tag 带 `-Beta` 后缀（如 `v1.3.1-Beta`）。
 - **强制更新版**：tag 带 `-Force` 后缀，客户端检测到后弹窗禁跳过。
-- 设置页「更新渠道」可选 **稳定版**（默认）/ **测试版** / **Actions 调试构建**：
+- 设置页「更新渠道」可选 **稳定版**（默认）/ **测试版**：
   - 稳定渠道只接收正式版；测试渠道同时接收稳定版 + Beta 版。
-  - **Actions 调试构建**：直接从 GitHub Actions 拉取最新 main 分支调试 APK。该渠道**不稳定**，切换时会弹出警告。
 - **所有渠道均应用内下载并安装**（下载进度条 → 系统安装器），不再跳转浏览器。
 - **CNB 镜像（cnb.cool）为首选更新源**：应用优先从 `https://cnb.cool/WLudy/MSLX_APP-Android` 下载更新 APK，
   失败时自动回退 GitHub Releases（大陆网络环境下载更快、更稳）。
-- Release 说明规则：正式版包含自上一正式版以来的全部更新（含中间 Beta）；Beta 版包含自上一 Beta 以来的全部更新（含中间 Actions 构建）。
+- Release 说明规则：正式版包含自上一正式版以来的全部更新（含中间 Beta）；Beta 版包含自上一 Beta 以来的全部更新。
 
 ## 📜 开源协议
 
@@ -180,11 +181,10 @@ MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器
 
 ## 🤖 持续集成（GitHub Actions / CNB）
 
-- **android.yml**：`main` 分支 push / PR 时自动构建 debug 与 release（未签名）APK，并上传 debug APK 工件；
-  main push 时还会用正式签名构建 debug APK（可直接覆盖安装正式版），并发布到 `dev` Release 供「Actions 调试构建」渠道拉取。
+- **android.yml**：`main` 分支 push / PR 时自动构建 debug 与 release APK，并上传 debug APK 工件；main 构建通过后先合并 CNB main 再普通推送源码，不覆盖 CNB 独立提交。
 - **CNB 云构建（.cnb.yml）**：镜像仓库 https://cnb.cool/WLudy/MSLX_APP-Android 上，main push 自动构建 debug APK；
   `v*` tag 推送时从密钥仓库恢复签名、构建 release APK 并发布 CNB Release（应用首选更新源）。
-- **release.yml**：推送 `v*` 标签时，使用仓库 Secrets 恢复签名密钥，构建签名 release APK 并自动附加到对应 Release。
+- **release.yml**：推送 `v*` 标签时，使用仓库 Secrets 恢复签名密钥，构建签名 release APK 并自动附加到对应 Release；完成后同步 main 源码和 tag 到 CNB。
 - **auto-issue-review.yml**：新 issue 打开时用 AI 自动打标签并评论。直接调用 GitHub Copilot CLI
   （`copilot -p ... -s --no-ask-user`，官方推荐模式，提示词模板在 `Prompts/issue-review-instructions.txt`；
   此前用的 `actions/ai-inference@v1` 内部仍走已退役的 GitHub Models 端点，2026-07-30 起必然失败）。
@@ -200,8 +200,9 @@ MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器
 | --- | --- |
 | `KEYSTORE_BASE64` | 对 `.jks` 密钥库执行 `base64` 编码后的内容 |
 | `KEYSTORE_PASSWORD` | 密钥库密码 |
-| `KEY_ALIAS` | 密钥别名 |
 | `KEY_PASSWORD` | 密钥密码 |
 
+签名 JKS 必须使用 `wludy` 别名。Android 包名和签名已变更，GitHub Actions 与 CNB 私有密钥仓库都需要更新为 `keystore/rolithax-release.jks` 对应的新密钥与密码；旧版签名密钥不能用于 Rolithax 发行包。
+
 > Windows 生成 `KEYSTORE_BASE64`：
-> `[Convert]::ToBase64String([IO.File]::ReadAllBytes('keystore\mslx-release.jks'))`
+> `[Convert]::ToBase64String([IO.File]::ReadAllBytes('keystore\rolithax-release.jks'))`

@@ -24,14 +24,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # AI 会用 git log/blame 查历史，浅克隆只给 1 个提交不够用
           fetch-depth: 100
 
       # 固定 CLI 版本，避免 latest 或 CLI 自动更新改变模型目录。
       - name: 配置 Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -43,7 +43,7 @@ jobs:
 
       - name: 读取 Issue 标题和正文
         id: issue
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const issue = await github.rest.issues.get({
@@ -102,7 +102,7 @@ jobs:
             }
 
       - name: 解析并应用 AI 评审结果
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           AI_RESPONSE_FILE: ${{ runner.temp }}/ai-response.txt
           AI_OUTCOME: ${{ steps.ai.outcome }}

@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 
 // 读取本地签名配置（keystore.properties），不存在时 release 将产出未签名包
@@ -14,17 +15,17 @@ val keystoreProperties = Properties().apply {
 }
 
 android {
-    namespace = "com.mslx.console"
+    namespace = "com.wludy.rolithax.launcher"
     compileSdk = 35
     // 本机开服需要 NDK：进程内 JVM 桥接（dlopen libjvm.so + JNI_CreateJavaVM）
     ndkVersion = "28.2.13676358"
 
     defaultConfig {
-        applicationId = "com.mslx.console"
+        applicationId = "com.wludy.rolithax.launcher"
         minSdk = 24
         targetSdk = 35
         versionCode = 39
-        // CI Actions 构建会以 -PversionName=x.x.x.x 覆盖（见 android.yml Compute Actions version）
+        // 本地打包脚本可通过 -PversionName 覆盖版本名。
         versionName = (project.findProperty("versionName") as String?) ?: "1.7.7"
 
         ndk {
@@ -52,9 +53,8 @@ android {
 
     buildTypes {
         debug {
-            // Actions 渠道：CI 恢复正式签名密钥后，debug APK 也用 release 签名，
-            // 使 Actions 调试构建可直接覆盖安装正式版（同签名升级，无需先卸载）。
-            // 本地无 keystore.properties 时仍走默认 debug 签名。
+            // 配置本地正式密钥时允许调试包使用同一签名，便于验证覆盖安装。
+            // 未配置密钥时使用默认 debug 签名。
             if (keystoreProperties.containsKey("storeFile")) {
                 signingConfig = signingConfigs.getByName("release")
             }
@@ -147,6 +147,12 @@ dependencies {
     implementation(libs.signalr)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    implementation(libs.androidx.room.paging)
+    implementation(libs.androidx.paging.runtime)
+    implementation(libs.androidx.paging.compose)
+    ksp(libs.androidx.room.compiler)
 
     // 本机开服：解压内嵌 Android JRE（上游 .tar.xz）
     implementation(libs.xz)

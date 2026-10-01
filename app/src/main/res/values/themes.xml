@@ -1,19 +1,19 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Compose 应用使用系统 NoActionBar 主题作为宿主窗口主题，实际配色由 Compose 主题控制。 -->
-    <style name="Theme.MSLXConsole" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.Rolithax" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
     </style>
 
     <!-- Android 12+ 系统开屏(SplashScreen)，由 androidx.core:core-splashscreen 提供兼容。
          背景与 Compose SplashScreen(BrandSulfur)一致；图标用自适应前景(内容在安全区内)，
          避免系统圆形遮罩把满幅 logo 裁切导致显示不完全。 -->
-    <style name="Theme.MSLXConsole.Starting" parent="Theme.SplashScreen">
+    <style name="Theme.Rolithax.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
         <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
-        <item name="postSplashScreenTheme">@style/Theme.MSLXConsole</item>
+        <item name="postSplashScreenTheme">@style/Theme.Rolithax</item>
     </style>
 
-    <style name="Theme.MSLXConsole.Scanner" parent="android:style/Theme.Material.NoActionBar">
+    <style name="Theme.Rolithax.Scanner" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>

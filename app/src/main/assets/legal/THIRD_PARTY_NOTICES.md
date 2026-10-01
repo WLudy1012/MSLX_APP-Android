@@ -1,6 +1,6 @@
 # 第三方组件与许可（THIRD PARTY NOTICES）
 
-本文件是 MSLX 控制台（Android 端，包名 `com.mslx.console`）所用第三方组件与许可的**正本**，
+本文件是 Rolithax Launcher（Android 端，包名 `com.wludy.rolithax.launcher`）所用第三方组件与许可的**正本**，
 随 APK 打包（`assets/legal/THIRD_PARTY_NOTICES.md`），应用内「设置 → 关于 → 合规与许可」
 可直接离线查看；仓库根目录的 `THIRD_PARTY_NOTICES.md` 只是指向本文件的说明。
 
@@ -10,9 +10,9 @@
 
 | 名称 | 角色 | 许可 |
 | --- | --- | --- |
-| MSLX_APP-Android（本应用） | MSLX 的第三方 Android 客户端 | AGPL-3.0 |
+| Rolithax Launcher（本应用） | 面向 MSLX Daemon 的 Android 客户端 | AGPL-3.0 |
 | [MSLX](https://github.com/MSLTeam/MSLX)（MSLTeam） | 被管理的守护程序（MSLX Daemon）与其桌面端 | AGPL-3.0 |
-| MSLAPI（mslapi / mslxapi） | 服务端核心与版本元数据、下载地址、SHA-256 | 未声明开源许可，仅作为外部 HTTP 接口调用 |
+| [MSLAPI（mslapi / mslxapi）](https://mslmc.cn) | Java 运行时、服务端核心与版本元数据、下载地址、SHA-256；本服务由 MSL 开服器提供 | 未声明开源许可，仅作为外部 HTTP 接口调用 |
 | Minecraft / Mojang Studios | 被管理的服务端程序本身与其 EULA | 非开源；服务端运行须自行同意 Minecraft EULA |
 
 本应用是**独立第三方应用**，并非 MSLX 官方或 MSLTeam 发布的产品，两者之间不存在责任、

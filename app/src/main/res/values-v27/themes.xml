@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.MSLXConsole.Scanner">
+    <style name="Theme.Rolithax.Scanner">
         <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>

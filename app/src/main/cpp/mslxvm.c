@@ -1,5 +1,5 @@
 /*
- * MSLX-Android 本机开服：进程内 JVM 桥接
+ * Rolithax Launcher 本机开服：进程内 JVM 桥接
  *
  * 为什么不是 ProcessBuilder exec java：
  *   Android 10+ 对 targetSdk >= 29 的应用禁止 execve() 自己 data 目录里的文件（SELinux），

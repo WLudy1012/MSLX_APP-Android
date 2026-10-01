@@ -1,5 +1,5 @@
 # CNB（cnb.cool）云构建配置：main push 构建 debug APK；v* tag 推送时构建签名 release APK 并发布 CNB Release。
-# 签名密钥通过 imports 注入（密钥仓库 keystore.yml：KEYSTORE_BASE64/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD），
+# 签名密钥通过 imports 注入（密钥仓库 keystore.yml：KEYSTORE_BASE64/KEYSTORE_PASSWORD/KEY_PASSWORD；JKS 别名固定为 wludy），
 # 未配置时 tag 流水线直接失败（不发布未签名包，应用端会自动回退 GitHub 下载）。
 
 main:
@@ -81,7 +81,7 @@ $:
           # 同 main：只缓存 NDK 子目录，避免数据卷遮住镜像预装的 SDK（cmdline-tools 等）
           - /opt/android-sdk-linux/ndk:cow
       imports:
-        # 私有密钥仓库文件（用户自建，勿公开）：内含 KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD
+        # 私有密钥仓库文件（用户自建，勿公开）：内含 KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_PASSWORD
         https://cnb.cool/WLudy/MSLX-secrets/-/blob/main/keystore.yml
       stages:
         - name: 预热 Android SDK（NDK）
@@ -128,12 +128,23 @@ $:
               echo "ERROR: KEYSTORE_BASE64 未配置（请在私有密钥仓库 MSLX-secrets 提供 keystore.yml）" >&2
               exit 1
             fi
+            if [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+              echo "ERROR: KEYSTORE_PASSWORD 或 KEY_PASSWORD 未配置" >&2
+              exit 1
+            fi
             mkdir -p keystore
-            echo "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > keystore/release.jks
+            echo "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > keystore/release.jks || {
+              echo "ERROR: KEYSTORE_BASE64 解码失败，请更新为 Rolithax release JKS" >&2
+              exit 1
+            }
+            keytool -list -keystore keystore/release.jks -storepass "$KEYSTORE_PASSWORD" -alias wludy > /dev/null 2>&1 || {
+              echo "ERROR: 签名密钥无效或缺少 wludy 别名，请更新 CNB 私有签名 Secrets" >&2
+              exit 1
+            }
             cat > keystore.properties <<EOF
             storeFile=keystore/release.jks
             storePassword=${KEYSTORE_PASSWORD}
-            keyAlias=${KEY_ALIAS}
+            keyAlias=wludy
             keyPassword=${KEY_PASSWORD}
             EOF
 

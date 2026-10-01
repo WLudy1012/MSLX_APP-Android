@@ -20,52 +20,31 @@ jobs:
       MSLX_MAVEN_CENTRAL_MIRROR: https://maven.aliyun.com/repository/public
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # 完整历史用于构建诊断与版本信息
           fetch-depth: 0
           # 显式获取 tag，便于构建记录
           fetch-tags: true
 
-      - name: 同步 main 源码到 CNB
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${CNB_TOKEN:-}" ]; then
-            echo "::warning::未配置 CNB_TOKEN，跳过 CNB main 源码同步。"
-            exit 0
-          fi
-          git remote add cnb "https://cnb:${CNB_TOKEN}@cnb.cool/WLudy/MSLX_APP-Android.git"
-          # CNB 可能保留了上一次镜像生成的不同提交对象，普通 push 会被非快进保护拒绝。
-          # 先读取远端期望值，再强制对齐 GitHub main；若期间发生新的 CNB 改动，lease 会保护它。
-          git fetch cnb refs/heads/main:refs/remotes/cnb/main --quiet
-          CNB_MAIN=$(git rev-parse refs/remotes/cnb/main)
-          git push cnb "HEAD:refs/heads/main" --force-with-lease="refs/heads/main:${CNB_MAIN}"
-
       - name: 配置 JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
-      # Android SDK 组件缓存：NDK（约 1GB）是最大耗时项，当前每次全新构建都要下载。
-      # 缓存 miss 时 AGP 会自动下载并在 job 结束时由本 step 回写缓存。
+      # 只缓存 NDK（约 1GB）；runner 预装的 platform/build-tools 权限不适合通过 tar 恢复。
+      # 缓存 miss 时 sdkmanager 会安装 NDK，job 结束后再由此 step 回写缓存。
       # 注意：Gradle 依赖缓存（~/.gradle）由下面的 gradle/actions/setup-gradle 负责
       #（其内部就是基于 actions/cache 的官方实现），这里不要重复缓存 ~/.gradle，
       # 否则两套缓存系统还原到同一目录会互相覆盖。
-      - name: 缓存 Android SDK（NDK / 平台 / 构建工具）
-        uses: actions/cache@v4
+      - name: 缓存 Android NDK
+        uses: actions/cache@v6
         with:
-          path: |
-            ${{ env.ANDROID_SDK_ROOT }}/ndk/28.2.13676358
-            ${{ env.ANDROID_SDK_ROOT }}/platforms/android-35
-            ${{ env.ANDROID_SDK_ROOT }}/build-tools/35.0.0
-          # key 写入组件版本：升级 NDK/SDK 时 key 自然失效，缓存随之重建
-          key: android-sdk-35-ndk-28.2.13676358-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ env.ANDROID_SDK_ROOT }}/ndk/28.2.13676358
+          key: android-ndk-28.2.13676358-${{ runner.os }}-${{ runner.arch }}
           restore-keys: |
-            android-sdk-35-ndk-28.2.13676358-${{ runner.os }}-
+            android-ndk-28.2.13676358-${{ runner.os }}-
 
       # 不用 android-actions/setup-android@v3：它在末尾会执行 `sdkmanager tools`，而 Google
       # 已把 `tools` 包从仓库下架（Warning: Failed to find package 'tools' → exit 1），
@@ -88,7 +67,7 @@ jobs:
             || echo "::warning::sdkmanager 预装未完全成功，交由 AGP 自动下载"
 
       - name: 配置 Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       # 依赖缓存健康检查（非阻断）：缓存完整时依赖解析可零网络通过
       #（即 install 阶段无需联网）；首次构建或依赖有更新时失败，仅提示正式构建会联网补齐。
@@ -119,20 +98,30 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          set -e
+          set -euo pipefail
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "::warning::Secret KEYSTORE_BASE64 为空，本次 debug 将使用默认 debug 签名（不可覆盖安装正式版）。"
             exit 0
           fi
+          if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::签名密钥已配置，但 KEYSTORE_PASSWORD 或 KEY_PASSWORD 为空。"
+            exit 1
+          fi
           mkdir -p keystore
-          echo "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > keystore/release.jks
+          echo "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > keystore/release.jks || {
+            echo "::error::KEYSTORE_BASE64 解码失败，请更新为 Rolithax release JKS。"
+            exit 1
+          }
+          keytool -list -keystore keystore/release.jks -storepass "$KEYSTORE_PASSWORD" -alias wludy > /dev/null 2>&1 || {
+            echo "::error::签名密钥无效或缺少 wludy 别名，请更新 GitHub 签名 Secrets。"
+            exit 1
+          }
           cat > keystore.properties <<EOF
           storeFile=keystore/release.jks
           storePassword=$KEYSTORE_PASSWORD
-          keyAlias=$KEY_ALIAS
+          keyAlias=wludy
           keyPassword=$KEY_PASSWORD
           EOF
 
@@ -142,8 +131,23 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
 
+      - name: 同步 main 源码到 CNB
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CNB_TOKEN:-}" ]; then
+            echo "::warning::未配置 CNB_TOKEN，跳过 CNB main 源码同步。"
+            exit 0
+          fi
+          git remote add cnb "https://cnb:${CNB_TOKEN}@cnb.cool/WLudy/MSLX_APP-Android.git"
+          git fetch cnb refs/heads/main:refs/remotes/cnb/main --quiet
+          git merge --no-edit --no-ff refs/remotes/cnb/main
+          git push cnb "HEAD:refs/heads/main"
+
       - name: 上传 Debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
