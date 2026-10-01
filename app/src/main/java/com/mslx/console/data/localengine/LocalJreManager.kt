@@ -21,9 +21,7 @@ import java.util.zip.ZipInputStream
  * （Java 8 无 `conf/`、无 `lib/modules`，类库以 `.jar.pack` 形式分发）。
  *
  * 覆盖 Java 版本 8 / 17 / 21 / 25（见 [RUNTIMES]）。每个版本按 ABI 提供下载源，
- * 顺序为「项目自托管 CNB 镜像 → 外部镜像 / 上游 GitHub」；SHA-256 **可选**：留空则跳过
- * 哈希校验，改用结构校验（`libjvm.so` 存在 + 版本标志文件）并打印告警——维护者上传镜像后
- * 可用 `fetch-jre-assets.ps1` 的 `Get-FileHash` 结果回填。
+ * 顺序为「项目自托管 CNB 镜像 → 外部镜像 / 上游 GitHub」；所有远端归档都必须配置 SHA-256。
  *
  * Java 8 特殊：归档为「universal（类库）+ bin-<abi>（二进制）」两个包，解开后还需把
  * `.jar.pack` 还原成 `.jar`（见 [AbiSpec.needsUnpack200]，由随 APK 安装的
@@ -77,7 +75,7 @@ object LocalJreManager {
      */
     private const val UNPACK200_LIB = "libunpack200.so"
 
-    /** 一个运行时归档：内嵌名 / 下载源（按序尝试）/ SHA-256（可空=跳过哈希校验）。 */
+    /** 一个运行时归档：内嵌名 / 下载源（按序尝试）/ 必填 SHA-256。 */
     data class AbiArchive(
         val assetName: String,
         val sources: List<String>,
@@ -448,7 +446,7 @@ object LocalJreManager {
 
     /**
      * 安装（或修复）指定运行时：优先 assets 内嵌归档，其次按预设源下载；
-     * 配置了 SHA-256 则校验，未配置则跳过哈希、改用结构校验（并告警）。
+     * 必须配置 SHA-256；校验通过后再进行结构检查。
      * 失败会清理半成品目录，绝不留下"看起来装好了"的残缺运行时。
      */
     suspend fun install(
@@ -517,19 +515,14 @@ object LocalJreManager {
             extractAndVerify(embedded.first, embedded.second, archive, home, runtime, onProgress)
             return
         }
-        if (archive.sha256.isBlank()) {
-            AppLogger.w(
-                "LocalJre",
-                "${runtime.label}（${archive.assetName}）未配置 SHA-256：将跳过哈希校验，仅做结构校验（建议维护者回填）",
-            )
-        }
+        if (archive.sha256.isBlank()) throw IllegalStateException("${runtime.label} 未配置 SHA-256，拒绝下载")
         val tmp = File(context.cacheDir, archive.assetName)
         var lastError: Throwable? = null
         var done = false
         for (url in archive.sources) {
             try {
                 AppLogger.i("LocalJre", "下载 ${runtime.label} 运行时：$url")
-                LocalDownloader.download(url, tmp, archive.sha256.ifBlank { null }) { onProgress(it * 0.5f) }
+                LocalDownloader.download(url, tmp, archive.sha256) { onProgress(it * 0.5f) }
                 onProgress(0.5f)
                 extractAndVerify({ FileInputStream(tmp) }, tmp.length(), archive, home, runtime) { p ->
                     onProgress(0.5f + p * 0.5f)
@@ -622,12 +615,12 @@ object LocalJreManager {
             // 必须把剩余字节读尽，否则 SHA-256 只覆盖了文件前缀，导致校验误报失败。
             counting.readToEof()
         }
-        // SHA-256 可选：留空则跳过（改用安装后的结构校验兜底）
-        if (archive.sha256.isNotBlank()) {
-            val actual = digest.digest().joinToString("") { "%02x".format(it) }
-            if (!actual.equals(archive.sha256, ignoreCase = true)) {
-                throw IllegalStateException("${runtime.label} 归档 SHA-256 校验失败：期望 ${archive.sha256}，实际 $actual")
-            }
+        if (!archive.sha256.matches(Regex("[0-9a-fA-F]{64}"))) {
+            throw IllegalStateException("${runtime.label} 未配置有效 SHA-256，拒绝安装")
+        }
+        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        if (!actual.equals(archive.sha256, ignoreCase = true)) {
+            throw IllegalStateException("${runtime.label} 归档 SHA-256 校验失败：期望 ${archive.sha256}，实际 $actual")
         }
     }
 

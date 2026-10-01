@@ -15,7 +15,7 @@ import javax.net.ssl.X509TrustManager
 object ApiClient {
 
     /**
-     * 客户端 User-Agent：直接读 BuildConfig.VERSION_NAME（CI Actions 渠道为 x.x.x.x 形态），
+     * 客户端 User-Agent：直接读 BuildConfig.VERSION_NAME，
      * 发版时不再需要手工同步版本号。
      */
     private val USER_AGENT = "MSLX-Android/${BuildConfig.VERSION_NAME}"

@@ -7,7 +7,7 @@ import com.mslx.console.data.remote.GitHubRelease
  * 应用更新信息（由 GitHub Release 解析而来）。
  */
 data class AppUpdateInfo(
-    /** 展示用版本标识：普通渠道为语义化版本；Actions 渠道为 "dev"。 */
+    /** 展示用版本标识。 */
     val version: String,
     /** Release 介绍（更新内容）。 */
     val notes: String,
@@ -17,15 +17,15 @@ data class AppUpdateInfo(
     val apkName: String,
     /** APK 大小（字节）。 */
     val apkSize: Long,
-    /** 是否为测试版（tag 带 -Beta 后缀，或 Actions 调试构建）。 */
+    /** 完整版 APK 的可信 SHA-256；缺失时拒绝安装。 */
+    val sha256: String? = null,
+    /** 是否为测试版（tag 带 -Beta 后缀）。 */
     val beta: Boolean = false,
     /**
      * 是否强制更新：任一高于当前版本的 release tag 带 -Force 后缀，
      * 或其说明含"强制更新"标记（旧版兼容）时为 true。
      */
     val forceUpdate: Boolean = false,
-    /** 是否为 Actions 调试构建（来自 dev Release，不稳定，需应用内下载安装）。 */
-    val actions: Boolean = false,
     /**
      * CNB（cnb.cool）镜像下载直链（稳定/测试渠道）。CNB 为首选更新源，
      * 下载失败时客户端自动回退 [downloadUrl]（GitHub）。为 null 时仅使用 GitHub。
@@ -38,6 +38,8 @@ data class AppUpdateInfo(
     val liteUrl: String? = null,
     /** 精简版 APK 大小（字节）。 */
     val liteSize: Long = 0,
+    /** 精简版 APK 的可信 SHA-256；缺失时拒绝安装。 */
+    val liteSha256: String? = null,
     /** 精简版 CNB 镜像直链。 */
     val liteCnbUrl: String? = null,
     /** 该更新包是否内嵌 JRE 运行时（本机开服可离线使用），按体积判定。 */
@@ -69,7 +71,7 @@ private data class ParsedRelease(
 
 /**
  * 检查应用更新：查询 GitHub 仓库 Release 列表，
- * 按更新渠道（稳定/测试/Actions）过滤，与当前版本比较，返回更新信息（无更新时返回 null）。
+ * 按更新渠道过滤，与当前版本比较，返回更新信息（无更新时返回 null）。
  */
 class UpdateRepository {
 
@@ -85,11 +87,6 @@ class UpdateRepository {
         currentVersion: String,
         channel: UpdateChannel,
     ): AppUpdateInfo? {
-        // Actions 渠道：取 dev Release 的四段版本号并与当前版本比较，已是最新则不再提示
-        if (channel == UpdateChannel.ACTIONS) {
-            return parseActionsRelease(releases, currentVersion)
-        }
-
         // 过滤出正式(非预发布)且带 APK 资产的版本，解析 tag 的 Beta/Force 后缀
         val parsed = releases
             .filter { !it.prerelease }
@@ -127,6 +124,7 @@ class UpdateRepository {
             downloadUrl = newest.apk.browserDownloadUrl.orEmpty(),
             apkName = apkName,
             apkSize = newest.apk.size ?: 0,
+            sha256 = assetSha256(newest.apk, newest.release.body),
             beta = newest.beta,
             forceUpdate = forceUpdate,
             embeddedJre = (newest.apk.size ?: 0) >= EMBEDDED_JRE_MIN_BYTES,
@@ -134,12 +132,26 @@ class UpdateRepository {
             cnbUrl = tag?.let { "$CNB_RELEASE_DOWNLOAD_BASE/$it/$apkName" },
             liteUrl = lite?.browserDownloadUrl,
             liteSize = lite?.size ?: 0,
+            liteSha256 = lite?.let { assetSha256(it, newest.release.body) },
             liteCnbUrl = if (lite != null && tag != null) {
                 "$CNB_RELEASE_DOWNLOAD_BASE/$tag/${lite.name}"
             } else {
                 null
             },
         )
+    }
+
+    private fun parseAssetSha256(body: String?, assetName: String?): String? {
+        if (body.isNullOrBlank() || assetName.isNullOrBlank()) return null
+        return body.lineSequence()
+            .firstOrNull { it.contains(assetName, ignoreCase = true) }
+            ?.let { Regex("(?i)\\b[0-9a-f]{64}\\b").find(it)?.value?.lowercase() }
+    }
+
+    private fun assetSha256(asset: com.mslx.console.data.remote.GitHubReleaseAsset, body: String?): String? {
+        val digest = asset.digest?.removePrefix("sha256:")?.trim()?.lowercase()
+        return digest?.takeIf { it.matches(Regex("[0-9a-f]{64}")) }
+            ?: parseAssetSha256(body, asset.name)
     }
 
     /**
@@ -155,29 +167,6 @@ class UpdateRepository {
         val full = apks.firstOrNull { it.name.equals(APK_FULL_NAME, ignoreCase = true) }
             ?: apks.filter { it !== lite }.maxByOrNull { it.size ?: 0 }
         return full to lite
-    }
-
-    /**
-     * 解析 Actions 渠道：取 tag 为 dev 的 Release（由 android.yml 每次 main push 覆盖发布）。
-     * 版本号取 Release name（如 1.3.0.28）；若其不高于当前版本（已安装同版本或更新构建）则返回 null，
-     * 避免"即使已是最新 Actions 构建仍提示更新"。
-     */
-    private fun parseActionsRelease(releases: List<GitHubRelease>, currentVersion: String): AppUpdateInfo? {
-        val dev = releases.firstOrNull { it.tagName?.trim()?.equals("dev", ignoreCase = true) == true } ?: return null
-        val apk = dev.assets.firstOrNull { it.name?.endsWith(".apk", ignoreCase = true) == true } ?: return null
-        val url = apk.browserDownloadUrl ?: return null
-        // Release name 即四段版本号（如 1.3.0.28）；无法解析时回退 "dev" 并照常提示
-        val version = dev.name?.trim()?.takeIf { it.firstOrNull()?.isDigit() == true } ?: "dev"
-        if (version != "dev" && compareVersions(version, currentVersion) <= 0) return null
-        return AppUpdateInfo(
-            version = version,
-            notes = dev.body.orEmpty(),
-            downloadUrl = url,
-            apkName = apk.name ?: "app-debug.apk",
-            apkSize = apk.size ?: 0,
-            beta = true,
-            actions = true,
-        )
     }
 
     /** 解析 tag 为 (版本号, 是否测试版, 是否强制版)。支持 v 前缀与 -Beta/-Force 后缀。 */
@@ -199,13 +188,13 @@ class UpdateRepository {
 
     /** 语义化版本比较："1.10.0" > "1.9.9"。返回正数表示 a 更新。 */
     private fun compareVersions(a: String, b: String): Int {
-        val pa = a.split(".").mapNotNull { it.toIntOrNull() }
-        val pb = b.split(".").mapNotNull { it.toIntOrNull() }
+        val pa = Regex("\\d+").findAll(a).take(4).mapNotNull { it.value.toIntOrNull() }.toList()
+        val pb = Regex("\\d+").findAll(b).take(4).mapNotNull { it.value.toIntOrNull() }.toList()
         val max = maxOf(pa.size, pb.size)
         for (i in 0 until max) {
             val x = pa.getOrElse(i) { 0 }
             val y = pb.getOrElse(i) { 0 }
-            if (x != y) return x - y
+            if (x != y) return x.compareTo(y)
         }
         return 0
     }

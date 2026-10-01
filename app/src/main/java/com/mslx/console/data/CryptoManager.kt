@@ -11,7 +11,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * 基于 Android Keystore 的 AES-GCM 加解密工具。
- * 密钥保存在系统 Keystore 中（不可导出），用于加密 Daemon 的 API Key 等敏感字段。
+ * 密钥保存在系统 Keystore 中（不可导出），用于加密 Daemon 配置。
  */
 object CryptoManager {
 
@@ -75,4 +75,6 @@ object CryptoManager {
             String(cipher.doFinal(ciphertext), Charsets.UTF_8)
         }.getOrNull()
     }
+
+    fun isEncrypted(encoded: String): Boolean = encoded.startsWith(ENC_PREFIX)
 }

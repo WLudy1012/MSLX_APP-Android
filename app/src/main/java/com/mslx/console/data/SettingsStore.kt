@@ -46,8 +46,8 @@ private const val LEGACY_DEFAULT_SEED_COLOR = 0xFF00838F
 /** 玻璃面板默认不透明度（与 ui.theme.DEFAULT_GLASS_ALPHA 保持一致）。 */
 private const val DEFAULT_GLASS_ALPHA = 0.78f
 
-/** 更新渠道：稳定版(默认) / 测试版(Beta) / Actions 调试构建。 */
-enum class UpdateChannel { STABLE, BETA, ACTIONS }
+/** 更新渠道：稳定版(默认) / 测试版(Beta)。 */
+enum class UpdateChannel { STABLE, BETA }
 
 /** 应用全局设置(主题 + 多 Daemon + 更新渠道 + 引导状态 + 本机开服默认值)。 */
 data class AppSettings(
@@ -72,7 +72,7 @@ data class AppSettings(
     val localUseSerialGc: Boolean = true,
     /** 本机开服增强模式：Shizuku 可用时以 shell 权限 exec 真正的 java 子进程（多实例/可重启/跨版本）。 */
     val localUseShizuku: Boolean = false,
-    /** Daemon 配置解析失败（原始 JSON 已备份且已记日志），设置页据此给出提示。 */
+    /** Daemon 配置解析失败（已清理并记日志），设置页据此给出提示。 */
     val daemonDecodeFailed: Boolean = false,
 ) {
     val activeDaemon: DaemonConfig?
@@ -86,16 +86,20 @@ class SettingsStore(private val context: Context) {
     private val gson = Gson()
     private val mutex = Mutex()
 
-    /** 损坏配置的异步备份专用作用域（读写 SettingsStore 自身不持有协程作用域）。 */
-    private val backupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val migrationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** 备份只需一次：进程内首次发现解析失败时触发，避免每次 DataStore 发射都重复写盘。 */
     @Volatile
-    private var corruptBackupScheduled = false
+    private var corruptCleanupScheduled = false
+
+    @Volatile
+    private var legacyMigrationAttemptedFor: Int? = null
+
+    @Volatile
+    private var legacyBackupCleanupScheduled = false
 
     private object Keys {
         val DAEMONS = stringPreferencesKey("daemons")
-        /** 解析失败的 daemons 原始 JSON 备份（独立 key，不参与业务流程）。 */
+        /** 旧版本写入的损坏 Daemon JSON 备份；读取时会清除，避免明文长期留存。 */
         val DAEMONS_BACKUP = stringPreferencesKey("daemons_backup_corrupt")
         val ACTIVE_DAEMON = stringPreferencesKey("active_daemon")
         val THEME_MODE = stringPreferencesKey("theme_mode")
@@ -117,9 +121,10 @@ class SettingsStore(private val context: Context) {
     }
 
     val settingsFlow: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
+        clearLegacyCorruptBackup()
         val rawDaemons = prefs[Keys.DAEMONS]
         val decoded = rawDaemons?.let(::decodeDaemons)
-        if (decoded?.failed == true) backupCorruptDaemons(rawDaemons)
+        if (decoded?.failed == true) clearCorruptDaemons(rawDaemons)
         AppSettings(
             daemons = decoded?.daemons ?: emptyList(),
             activeDaemonId = prefs[Keys.ACTIVE_DAEMON]?.takeIf { it.isNotBlank() },
@@ -133,7 +138,6 @@ class SettingsStore(private val context: Context) {
             darkBackgroundPath = prefs[Keys.BACKGROUND_DARK].orEmpty(),
             updateChannel = when (prefs[Keys.UPDATE_CHANNEL]) {
                 "beta" -> UpdateChannel.BETA
-                "actions" -> UpdateChannel.ACTIONS
                 else -> UpdateChannel.STABLE
             },
             onboarded = prefs[Keys.ONBOARDED] ?: false,
@@ -150,8 +154,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun update(transform: (AppSettings) -> AppSettings) = mutex.withLock {
         val next = transform(settingsFlow.first())
+        val encryptedDaemons = encodeDaemons(next.daemons)
         context.settingsDataStore.edit { prefs ->
-            prefs[Keys.DAEMONS] = encodeDaemons(next.daemons)
+            prefs[Keys.DAEMONS] = encryptedDaemons
+            prefs.remove(Keys.DAEMONS_BACKUP)
             prefs[Keys.ACTIVE_DAEMON] = next.activeDaemonId ?: ""
             prefs[Keys.THEME_MODE] = if (next.themeMode == ThemeMode.SEED) "seed" else "dynamic"
             prefs[Keys.SEED_COLOR] = next.seedColor
@@ -163,7 +169,6 @@ class SettingsStore(private val context: Context) {
             prefs[Keys.DISCLAIMER_ACCEPTED] = next.disclaimerAccepted
             prefs[Keys.UPDATE_CHANNEL] = when (next.updateChannel) {
                 UpdateChannel.BETA -> "beta"
-                UpdateChannel.ACTIONS -> "actions"
                 UpdateChannel.STABLE -> "stable"
             }
             prefs[Keys.LOCAL_MIN_MEM] = next.localMinMemMb
@@ -247,46 +252,82 @@ class SettingsStore(private val context: Context) {
     /** 用户已同意第三方免责声明。 */
     suspend fun acceptDisclaimer() = update { it.copy(disclaimerAccepted = true) }
 
-    private fun encodeDaemons(daemons: List<DaemonConfig>): String =
-        gson.toJson(
-            daemons.map {
-                // 加密失败（fail-closed）：清空 apiKey，禁止明文落盘
-                it.copy(apiKey = CryptoManager.encrypt(it.apiKey) ?: "")
-            },
-        )
+    private fun encodeDaemons(daemons: List<DaemonConfig>): String {
+        val json = gson.toJson(daemons)
+        return CryptoManager.encrypt(json)
+            ?: throw IllegalStateException("Daemon 配置加密失败，未保存设置")
+    }
 
     private data class DecodedDaemons(val daemons: List<DaemonConfig>, val failed: Boolean)
 
     /**
-     * 解析 daemons JSON；失败标记 [DecodedDaemons.failed]（不再静默返回空列表），
-     * 由 [settingsFlow] 负责备份原始 JSON、记日志并在设置页给出提示。
+     * 新格式加密整个配置；旧格式仅加密 API Key，读取后异步迁移。
      */
-    private fun decodeDaemons(json: String): DecodedDaemons {
-        if (json.isBlank()) return DecodedDaemons(emptyList(), failed = false)
+    private fun decodeDaemons(stored: String): DecodedDaemons {
+        if (stored.isBlank()) return DecodedDaemons(emptyList(), failed = false)
+        val encrypted = CryptoManager.isEncrypted(stored)
+        val json = if (encrypted) CryptoManager.decrypt(stored) ?: return DecodedDaemons(emptyList(), true) else stored
         val parsed = runCatching {
             gson.fromJson<List<DaemonConfig>>(json, object : TypeToken<List<DaemonConfig>>() {}.type)
         }.getOrNull() ?: return DecodedDaemons(emptyList(), failed = true)
-        return DecodedDaemons(
-            parsed.map {
-                // 解密失败（如备份恢复后 Keystore 密钥丢失）时清空 apiKey，避免把密文当明文
-                it.copy(apiKey = CryptoManager.decrypt(it.apiKey).orEmpty())
-            },
-            failed = false,
-        )
+        if (encrypted) return DecodedDaemons(parsed, failed = false)
+
+        val migrated = mutableListOf<DaemonConfig>()
+        for (daemon in parsed) {
+            val key = if (CryptoManager.isEncrypted(daemon.apiKey)) {
+                CryptoManager.decrypt(daemon.apiKey) ?: return DecodedDaemons(emptyList(), failed = true)
+            } else {
+                daemon.apiKey
+            }
+            migrated += daemon.copy(apiKey = key)
+        }
+        scheduleLegacyDaemonMigration(stored, migrated)
+        return DecodedDaemons(migrated, failed = false)
     }
 
-    /** 解析失败：备份原始 JSON + 记错误日志（只执行一次），供设置页提示与后续排查。 */
-    private fun backupCorruptDaemons(rawJson: String) {
-        if (corruptBackupScheduled) return
-        corruptBackupScheduled = true
+    private fun scheduleLegacyDaemonMigration(stored: String, daemons: List<DaemonConfig>) {
+        val fingerprint = stored.hashCode()
+        synchronized(this) {
+            if (legacyMigrationAttemptedFor == fingerprint) return
+            legacyMigrationAttemptedFor = fingerprint
+        }
+        migrationScope.launch {
+            runCatching {
+                val encrypted = encodeDaemons(daemons)
+                context.settingsDataStore.edit { prefs ->
+                    if (prefs[Keys.DAEMONS] == stored) prefs[Keys.DAEMONS] = encrypted
+                    prefs.remove(Keys.DAEMONS_BACKUP)
+                }
+            }.onFailure {
+                AppLogger.e("Settings", "Daemon 配置加密迁移失败；未写入明文替代值")
+            }
+        }
+    }
+
+    private fun clearCorruptDaemons(stored: String) {
+        if (corruptCleanupScheduled) return
+        corruptCleanupScheduled = true
         AppLogger.e(
             "Settings",
-            "Daemon 配置解析失败：原始数据（${rawJson.length} 字符）已备份到 ${Keys.DAEMONS_BACKUP.name}，请在设置页重新添加连接",
+            "Daemon 配置无法解密或解析；已清理不可恢复的数据，请在设置页重新添加连接",
         )
-        backupScope.launch {
+        migrationScope.launch {
             runCatching {
-                context.settingsDataStore.edit { prefs -> prefs[Keys.DAEMONS_BACKUP] = rawJson }
-            }.onFailure { AppLogger.w("Settings", "备份损坏的 Daemon 配置失败", it) }
+                context.settingsDataStore.edit { prefs ->
+                    if (prefs[Keys.DAEMONS] == stored) prefs.remove(Keys.DAEMONS)
+                    prefs.remove(Keys.DAEMONS_BACKUP)
+                }
+            }.onFailure { AppLogger.w("Settings", "清理损坏的 Daemon 配置失败", it) }
+        }
+    }
+
+    private fun clearLegacyCorruptBackup() {
+        if (legacyBackupCleanupScheduled) return
+        legacyBackupCleanupScheduled = true
+        migrationScope.launch {
+            runCatching {
+                context.settingsDataStore.edit { it.remove(Keys.DAEMONS_BACKUP) }
+            }.onFailure { AppLogger.w("Settings", "清理旧版 Daemon 备份失败", it) }
         }
     }
 }

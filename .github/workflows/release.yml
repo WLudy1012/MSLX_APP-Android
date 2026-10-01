@@ -183,10 +183,10 @@ jobs:
           fi
 
       # 生成 release notes：取"上一版"并列出其到本版的全部提交。
-      # 层级规则（正式版 x.x / Beta x.x.x / Actions x.x.x.x）：
+      # 层级规则（正式版 x.x / Beta x.x.x）：
       #   - 正式版/强制版：上一版 = 最近一个不带 -Beta 后缀的 v* tag（跳过中间所有 Beta，保证
       #     release note 包含"直至上一正式版的全部 Beta 更新"）；
-      #   - Beta 版：上一版 = 最近一个带 -Beta 后缀的 v* tag（包含中间 Actions 更新）；若无，
+      #   - Beta 版：上一版 = 最近一个带 -Beta 后缀的 v* tag；若无，
       #     回退到最近一个不带 -Beta 的 tag。
       - name: 生成发布说明
         run: |

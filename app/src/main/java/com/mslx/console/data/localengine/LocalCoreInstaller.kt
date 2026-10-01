@@ -42,11 +42,13 @@ class LocalCoreInstaller(
     ): Result<Pair<File, LocalInstanceMeta>> = runCatching {
         val info = repository.serverCoreDownloadInfo(core, version, build).getOrNull()
             ?: throw IllegalStateException("MSLAPI 未返回核心下载信息")
-        val url = info.url ?: throw IllegalStateException("核心下载地址为空")
+        val url = info.url.takeIf { it.isNotBlank() } ?: throw IllegalStateException("核心下载地址为空")
+        val sha256 = info.sha256?.takeIf { it.isNotBlank() } ?:
+            throw IllegalStateException("MSLAPI 未提供核心 SHA-256，拒绝安装")
         serverDir.mkdirs()
         val target = File(serverDir, ServerFiles.SERVER_JAR_NAME)
         withContext(Dispatchers.IO) {
-            LocalDownloader.download(url, target, info.sha256) { onProgress(it) }
+            LocalDownloader.download(url, target, sha256) { onProgress(it) }
         }
         AppLogger.i(
             "LocalCore",
@@ -74,10 +76,11 @@ class LocalCoreInstaller(
         onProgress: (Float) -> Unit = {},
     ): Result<Pair<File, LocalInstanceMeta>> = runCatching {
         if (url.isBlank()) throw IllegalStateException("核心下载地址为空")
+        if (sha256.isBlank()) throw IllegalStateException("核心 SHA-256 为空，拒绝安装")
         serverDir.mkdirs()
         val target = File(serverDir, ServerFiles.SERVER_JAR_NAME)
         withContext(Dispatchers.IO) {
-            LocalDownloader.download(url, target, sha256.ifBlank { null }) { onProgress(it) }
+            LocalDownloader.download(url, target, sha256) { onProgress(it) }
         }
         AppLogger.i("LocalCore", "核心下载完成（URL）：$core $version → ${target.absolutePath}")
         val finalMeta = ServerFiles.complete(

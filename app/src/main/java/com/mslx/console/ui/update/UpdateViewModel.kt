@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 data class UpdateUiState(
@@ -30,9 +31,8 @@ data class UpdateUiState(
     val update: AppUpdateInfo? = null,
     /** 当前应用版本号，如 "1.2.16"。 */
     val currentVersion: String = "",
-    /** Actions 渠道：是否正在下载调试 APK。 */
-    val downloadingActions: Boolean = false,
-    /** Actions 渠道：下载进度 0..1。 */
+    val downloading: Boolean = false,
+    /** 下载进度 0..1。 */
     val downloadProgress: Float = 0f,
 )
 
@@ -97,7 +97,7 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                 onSuccess = { update ->
                     if (update != null) {
                         AppLogger.i(
-                            "Update", "发现新版本 ${update.version} beta=${update.beta} force=${update.forceUpdate} actions=${update.actions}"
+                            "Update", "发现新版本 ${update.version} beta=${update.beta} force=${update.forceUpdate}"
                         )
                     }
                     _state.update {
@@ -107,11 +107,7 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                     retryJob = null
                     if (manual && update == null) {
                         _message.tryEmit(
-                            if (channel == UpdateChannel.ACTIONS) {
-                                "未找到 Actions 构建，请确认 CI 已成功运行并发布了 dev 版本"
-                            } else {
-                                "当前已是最新版本"
-                            },
+                            "当前已是最新版本",
                         )
                     }
                 },
@@ -145,21 +141,21 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 用户选择"跳过"（关闭弹窗，本次启动不再提示；同时停止补偿重试与 Actions 下载）。 */
+    /** 用户选择"跳过"（关闭弹窗，本次启动不再提示）。 */
     fun skip() {
         retryJob?.cancel()
         retryJob = null
-        _state.update { it.copy(update = null, downloadingActions = false, downloadProgress = 0f) }
+        _state.update { it.copy(update = null, downloading = false, downloadProgress = 0f) }
     }
 
     /**
-     * 应用内下载 APK 并拉起系统安装器（稳定版/测试版/Actions 全部走此路径）。
+     * 应用内下载 APK 并拉起系统安装器。
      * 下载源顺序：CNB 镜像首选 → GitHub 回退（任一源失败自动尝试下一个）。
      * [lite] = true 时下载**不含内嵌 JRE** 的精简版（体积小，本机开服需联网下载运行时）。
      */
     fun downloadAndInstall(lite: Boolean = false) {
         val update = _state.value.update ?: return
-        if (_state.value.downloadingActions) return
+        if (_state.value.downloading) return
         val sources = if (lite && update.hasLiteVariant) {
             listOfNotNull(update.liteCnbUrl?.takeIf { it.isNotBlank() }, update.liteUrl)
         } else {
@@ -176,7 +172,12 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
             _message.tryEmit("下载地址不合法，已取消")
             return
         }
-        _state.update { it.copy(downloadingActions = true, downloadProgress = 0f) }
+        val expectedSha256 = if (lite && update.hasLiteVariant) update.liteSha256 else update.sha256
+        if (expectedSha256.isNullOrBlank()) {
+            _message.tryEmit("发布信息缺少 SHA-256 校验摘要，已取消安装")
+            return
+        }
+        _state.update { it.copy(downloading = true, downloadProgress = 0f) }
         viewModelScope.launch {
             val context = getApplication<Application>()
             var downloaded: File? = null
@@ -184,7 +185,7 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
             for (url in candidates) {
                 _state.update { it.copy(downloadProgress = 0f) }
                 val result = withContext(Dispatchers.IO) {
-                    runCatching { downloadToFile(context, url) }
+                    runCatching { downloadToFile(context, url, expectedSha256) }
                 }
                 result.onSuccess { file ->
                     downloaded = file
@@ -198,18 +199,18 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
             val file = downloaded
             if (file != null) {
                 AppLogger.i("Update", "APK 下载完成 ${file.length()} bytes")
-                _state.update { it.copy(downloadingActions = false, update = null, downloadProgress = 0f) }
+                _state.update { it.copy(downloading = false, update = null, downloadProgress = 0f) }
                 installApk(context, file)
             } else {
                 AppLogger.w("Update", "APK 下载失败（所有源均失败）", lastError)
-                _state.update { it.copy(downloadingActions = false, downloadProgress = 0f) }
+                _state.update { it.copy(downloading = false, downloadProgress = 0f) }
                 _message.tryEmit("APK 下载失败：${lastError?.message ?: "未知错误"}")
             }
         }
     }
 
     /** 下载 APK 到 filesDir/apks/mslx-update.apk（带进度回调）。 */
-    private suspend fun downloadToFile(context: Context, url: String): File {
+    private suspend fun downloadToFile(context: Context, url: String, expectedSha256: String): File {
         val request = okhttp3.Request.Builder().url(url).build()
         val client = okhttp3.OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -226,26 +227,45 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
             val total = body.contentLength()
             val dir = File(context.filesDir, "apks").apply { mkdirs() }
             val target = File(dir, "mslx-update.apk")
+            val partial = File(dir, "mslx-update.apk.part")
+            partial.delete()
+            val digest = MessageDigest.getInstance("SHA-256")
+            try {
             body.byteStream().use { input ->
-                target.outputStream().use { output ->
+                partial.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     var downloaded = 0L
                     while (true) {
                         val read = input.read(buffer)
                         if (read < 0) break
+                        if (read == 0) continue
                         output.write(buffer, 0, read)
+                        digest.update(buffer, 0, read)
                         downloaded += read
                         if (total > 0) {
                             _state.update { it.copy(downloadProgress = downloaded.toFloat() / total) }
                         }
                     }
+                    if (total >= 0 && downloaded != total) {
+                        throw IllegalStateException("下载内容不完整：期望 $total 字节，实际 $downloaded 字节")
+                    }
                 }
             }
+            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            if (!actual.equals(expectedSha256.trim(), ignoreCase = true)) {
+                throw IllegalStateException("APK SHA-256 校验失败")
+            }
             // 魔数校验：APK 为 ZIP 格式（PK\x03\x04），防止下载到错误内容仍触发安装器
-            if (!hasZipMagic(target)) {
+            if (!hasZipMagic(partial)) {
                 throw IllegalStateException("下载内容不是有效的 APK")
             }
+            if (target.exists() && !target.delete()) throw IllegalStateException("无法替换旧 APK")
+            if (!partial.renameTo(target)) throw IllegalStateException("无法提交已校验 APK")
             return target
+            } catch (error: Throwable) {
+                partial.delete()
+                throw error
+            }
         }
     }
 

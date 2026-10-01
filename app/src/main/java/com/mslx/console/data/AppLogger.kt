@@ -119,7 +119,7 @@ object AppLogger {
         sb.append("设备: ${Build.MANUFACTURER} ${Build.MODEL} / Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\n")
         sb.append("应用: v$appVersion\n")
         sb.append("========== 堆栈 ==========\n")
-        sb.append(stack)
+        sb.append(sanitize(stack))
         runCatching { File(dir, CRASH_FILE).writeText(sb.toString()) }
     }
 
@@ -131,14 +131,13 @@ object AppLogger {
             append(' ')
             append(level)
             append('/')
-            append(tag)
+            append(sanitize(tag))
             append(": ")
             append(sanitize(message))
             if (throwable != null) {
-                append('\n')
-                append(throwable.javaClass.name)
-                if (!throwable.message.isNullOrBlank()) append(": ").append(throwable.message)
-                throwable.stackTrace.take(20).forEach { append("\n    at ").append(it.toString()) }
+                val stack = StringWriter()
+                throwable.printStackTrace(PrintWriter(stack))
+                append('\n').append(sanitize(stack.toString().trimEnd()))
             }
             append('\n')
         }
@@ -155,12 +154,21 @@ object AppLogger {
 
     /** 脱敏：隐藏 apiKey / token / password / cookie / 授权头等敏感值。 */
     private fun sanitize(text: String): String {
-        var out = text
+        var out = Regex("(?i)\\b(?:https?|wss?)://[^\\s\\\"'<>]+")
+            .replace(text, "<url>")
+        out = Regex("(?i)\\b[A-Z]:\\\\(?:[^\\s<>:\"|?*]+\\\\)*[^\\s<>:\"|?*]*")
+            .replace(out, "<path>")
+        out = Regex("(?<![\\w:])/(?:[^/\\s\\\"'<>]+/)*[^/\\s\\\"'<>]*")
+            .replace(out, "<path>")
+        out = Regex("\\b(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?::\\d{1,5})?\\b")
+            .replace(out, "<address>")
+        out = Regex("(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+")
+            .replace(out, "Bearer ***")
         val secretPatterns = listOf(
             Regex("(?i)(api[_-]?key|apikey|x-api-key)\\s*[:=]\\s*[\"']?[^\\s&\"']+"),
-            Regex("(?i)(token|access_token|password|passwd)\\s*[:=]\\s*[\"']?[^\\s&\"']+"),
+            Regex("(?i)(access[_-]?token|refresh[_-]?token|token|password|passwd)\\s*[:=]\\s*[\"']?[^\\s&\"']+"),
             Regex("(?i)(authorization)\\s*[:=]\\s*[\"']?[^\\s&\"']+"),
-            Regex("(?i)(cookie)\\s*[:=]\\s*[\"']?[^\\s&\"']+"),
+            Regex("(?i)(cookie|set-cookie)\\s*[:=]\\s*[\"']?[^\\s&\"']+"),
         )
         secretPatterns.forEach { regex ->
             out = regex.replace(out) { m ->

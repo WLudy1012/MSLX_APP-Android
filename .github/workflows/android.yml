@@ -22,9 +22,9 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
         with:
-          # 生成 dev 构建说明与 Actions 版本号时需要 tag 与提交信息
+          # 完整历史用于构建诊断与版本信息
           fetch-depth: 0
-          # 必须显式取 tag：git describe --tags 依赖它算 Actions 四段版本号
+          # 显式获取 tag，便于构建记录
           fetch-tags: true
 
       - name: 同步 main 源码到 CNB
@@ -113,8 +113,7 @@ jobs:
           fi
           echo "$SHA  $JRE" | sha256sum -c -
 
-      # 仅 main push 时恢复正式签名密钥：debug 构建用 release 签名，
-      # 产出的 Actions 调试 APK 可直接覆盖安装正式版（PR 无 Secrets，走默认 debug 签名）。
+      # 仅 main push 时恢复正式签名密钥；PR 使用默认 debug 签名。
       - name: 恢复签名密钥（仅 main）
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
@@ -137,75 +136,14 @@ jobs:
           keyPassword=$KEY_PASSWORD
           EOF
 
-      # Actions 版本号规则（x.x.x.x，四段）：
-      #   取最近一个 v* tag（去掉 v 与 -Beta/-Force 后缀）作为基准并补齐到三段，
-      #   再追加 .$GITHUB_RUN_NUMBER 作为第四段（本仓库累计运行号）。
-      #   示例：稳定 v1.15 → 1.15.0.12；beta v1.15.1 → 1.15.1.12。
-      - name: 计算 Actions 版本号（仅 main）
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          BASE="1.2.16"
-          if [ -n "$LATEST_TAG" ]; then
-            CLEAN=$(echo "$LATEST_TAG" | sed -E 's/^v//; s/-(Beta|Force)$//I')
-            case "$CLEAN" in
-              [0-9]*.[0-9]*.[0-9]*.[0-9]*) BASE="$CLEAN" ;;   # 4+ 段：直接使用
-              [0-9]*.[0-9]*.[0-9]*)        BASE="$CLEAN" ;;   # 3 段（beta）：直接使用
-              [0-9]*.[0-9]*)               BASE="$CLEAN.0" ;; # 2 段（稳定）：补第三段 0
-              *)                           BASE="1.2.16" ;;
-            esac
-          fi
-          echo "ACTIONS_VERSION=${BASE}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-          echo "ACTIONS_VERSION=${BASE}.${GITHUB_RUN_NUMBER}"
-
       # 无 keystore 时 release 会产出未签名包，仅用于验证可编译性
       - name: 构建 Debug 与 Release APK
         run: |
           chmod +x gradlew
-          if [ -n "$ACTIONS_VERSION" ]; then
-            ./gradlew assembleDebug assembleRelease -PversionName="$ACTIONS_VERSION" --no-daemon --stacktrace
-          else
-            ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
-          fi
+          ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
 
       - name: 上传 Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-
-      # Actions 更新渠道的数据源：把 main 分支最新 debug APK 发布到 dev Release（覆盖更新）。
-      # 注：GitHub Actions 工件 zip 下载需要认证，应用无法直接拉取，故用公开 Release 承载。
-      - name: 发布 Debug APK 到 dev Release（仅 main）
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          SHA=$(sha256sum app/build/outputs/apk/debug/app-debug.apk | awk '{print $1}')
-          {
-            echo "# MSLX_APP-Android Actions 调试构建（不稳定）"
-            echo ""
-            echo "- 版本：\`$ACTIONS_VERSION\`"
-            echo "- 提交：\`${GITHUB_SHA:0:7}\`"
-            echo "- 分支：main"
-            echo "- 构建时间：$(date -u '+%Y-%m-%d %H:%M UTC')"
-            echo "- 签名：正式签名（可覆盖安装正式版）"
-            echo ""
-            echo "## 校验"
-            echo ""
-            echo "APK 文件：\`app-debug.apk\`"
-            echo "SHA-256：\`$SHA\`"
-          } > dev_release_notes.md
-
-      - name: 上传 Debug APK 到 dev Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: dev
-          # name 放真实四段版本号（如 1.3.0.28），供客户端解析并做版本比较
-          name: "${{ env.ACTIONS_VERSION }}"
-          body_path: dev_release_notes.md
-          files: app/build/outputs/apk/debug/app-debug.apk
-          # v2 对已存在同名 release 自动更新；overwrite_files 覆盖同名 APK 资产；
-          # make_latest=false 防止 dev 被标记为 GitHub 最新 Release（影响 About 页 latestRelease）。
-          overwrite_files: true
-          fail_on_unmatched_files: true
-          make_latest: false

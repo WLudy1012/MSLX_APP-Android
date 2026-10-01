@@ -33,7 +33,7 @@ import com.mslx.console.data.localengine.LocalJreManager
  * 全局更新弹窗宿主：挂载在导航根节点外层。
  * - 启动自动检查：发现新版本即弹窗；
  * - 设置页手动检查：结果也通过同一状态弹窗/提示；
- * - 所有渠道（稳定/测试/Actions）均在应用内下载并安装。
+ * - 稳定版与测试版均在应用内下载并安装。
  */
 @Composable
 fun UpdateHost(
@@ -57,7 +57,7 @@ fun UpdateHost(
             currentVersion = state.currentVersion,
             update = update,
             currentHasEmbeddedJre = currentHasEmbeddedJre,
-            downloading = state.downloadingActions,
+            downloading = state.downloading,
             downloadProgress = state.downloadProgress,
             onInstall = { viewModel.downloadAndInstall() },
             onInstallLite = { viewModel.downloadAndInstall(lite = true) },
@@ -90,7 +90,6 @@ private fun UpdateDialog(
         title = {
             Text(
                 text = when {
-                    update.actions -> "Actions 调试构建"
                     update.forceUpdate -> "必须更新到 v${update.version}"
                     update.beta -> "发现测试版 v${update.version}"
                     else -> "发现新版本 v${update.version}"
@@ -105,14 +104,6 @@ private fun UpdateDialog(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
             ) {
-                if (update.actions) {
-                    Text(
-                        text = "⚠ 该构建来自 GitHub Actions，为最新代码的调试版本，未经过正式测试，可能存在不稳定或功能异常，请谨慎安装。",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                }
                 if (update.forceUpdate) {
                     Text(
                         text = "此版本必须更新，否则无法继续使用。",
@@ -122,11 +113,7 @@ private fun UpdateDialog(
                     Spacer(Modifier.height(6.dp))
                 }
                 Text(
-                    text = when {
-                        update.actions && currentVersion.isNotBlank() -> "当前版本 v$currentVersion → Actions v${update.version}"
-                        currentVersion.isBlank() -> "更新内容："
-                        else -> "当前版本 v$currentVersion → 新版本 v${update.version}"
-                    },
+                    text = if (currentVersion.isBlank()) "更新内容：" else "当前版本 v$currentVersion → 新版本 v${update.version}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

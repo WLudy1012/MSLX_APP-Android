@@ -18,6 +18,7 @@ data class GitHubReleaseAsset(
     @SerializedName("name") val name: String? = null,
     @SerializedName("browser_download_url") val browserDownloadUrl: String? = null,
     @SerializedName("size") val size: Long = 0,
+    @SerializedName("digest") val digest: String? = null,
 )
 
 /** 仓库贡献者(部分字段)。 */
