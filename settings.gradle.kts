@@ -11,6 +11,13 @@
 pluginManagement {
     val googleMirror = System.getenv("MSLX_MAVEN_GOOGLE_MIRROR")?.trim().orEmpty()
     val centralMirror = System.getenv("MSLX_MAVEN_CENTRAL_MIRROR")?.trim().orEmpty()
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == "com.google.devtools.ksp") {
+                useModule("com.google.devtools.ksp:symbol-processing-gradle-plugin:${requested.version}")
+            }
+        }
+    }
     repositories {
         if (googleMirror.isNotEmpty()) {
             maven { url = uri(googleMirror) }
