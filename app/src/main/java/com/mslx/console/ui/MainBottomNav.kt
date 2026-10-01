@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -46,10 +47,11 @@ enum class TopPage(val label: String, val icon: ImageVector) {
     HOME("主页", Icons.Filled.Home),
     INSTANCES("实例", Icons.AutoMirrored.Filled.List),
     NEW_INSTANCE("新建", Icons.Filled.Add),
+    RESOURCES("资源", Icons.Filled.Info),
     SETTINGS("设置", Icons.Filled.Settings),
 }
 
-/** 四个顶层页共享的底部导航栏（Dock）：选中项图标弹跳缩放 + 指示 pill 淡入 + 颜色过渡。 */
+/** 五个顶层页共享的底部导航栏（Dock）。 */
 @Composable
 fun MainBottomNav(
     current: TopPage,
@@ -130,17 +132,21 @@ private fun RowScope.DockItem(
                 // 图标背后的圆角指示条
                 Box(
                     modifier = Modifier
-                        .size(width = 56.dp, height = 30.dp)
+                        .size(if (page == TopPage.NEW_INSTANCE) 46.dp else 56.dp)
                         .graphicsLayer { alpha = indicatorAlpha }
                         .clip(RoundedCornerShape(15.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)),
+                        .background(
+                            if (page == TopPage.NEW_INSTANCE) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                        ),
                 )
                 Icon(
                     imageVector = page.icon,
                     contentDescription = page.label,
-                    tint = if (isPressed) contentColor.copy(alpha = 0.6f) else contentColor,
+                    tint = if (page == TopPage.NEW_INSTANCE) MaterialTheme.colorScheme.onPrimary
+                    else if (isPressed) contentColor.copy(alpha = 0.6f) else contentColor,
                     modifier = Modifier
-                        .size(24.dp)
+                        .size(if (page == TopPage.NEW_INSTANCE) 28.dp else 24.dp)
                         .graphicsLayer {
                             scaleX = scale
                             scaleY = scale

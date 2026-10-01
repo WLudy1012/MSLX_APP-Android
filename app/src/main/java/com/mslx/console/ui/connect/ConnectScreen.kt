@@ -187,6 +187,22 @@ fun ConnectScreen(
             Spacer(Modifier.height(12.dp))
 
             OutlinedTextField(
+                value = state.endpointsText,
+                onValueChange = viewModel::onEndpointsChange,
+                label = { Text("备用地址（可选，每行一个）") },
+                placeholder = { Text("https://example.local:1027") },
+                minLines = 2,
+                maxLines = 4,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.34f),
+                    focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.48f),
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedTextField(
                 value = state.apiKey,
                 onValueChange = viewModel::onApiKeyChange,
                 label = { Text("API Key") },

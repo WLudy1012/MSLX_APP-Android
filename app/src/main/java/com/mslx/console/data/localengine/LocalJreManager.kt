@@ -42,7 +42,7 @@ object LocalJreManager {
      * 只会有当时挂过的归档，新归档 404）。
      */
     private const val CNB_JRE_MIRROR_BASE =
-        "https://cnb.cool/WLudy/MSLX_APP-Android/-/releases/download/v1.7"
+        "https://cnb.cool/WLudy/MSLX_APP-Android/-/releases/download/v1.7.7-Beta"
 
     /** 上游 PojavLauncher 多架构 OpenJDK 构建发布根（当前仅 jre17 为 Android 构建）。 */
     private const val UPSTREAM_MULTIARCH =
@@ -50,7 +50,7 @@ object LocalJreManager {
 
     /** GitHub Release 附件前缀（由 .github/workflows/release.yml 与 tag 同名发布）。 */
     private const val GITHUB_JRE_MIRROR_BASE =
-        "https://github.com/WLudy1012/MSLX_APP-Android/releases/download/v1.7"
+        "https://github.com/WLudy1012/MSLX_APP-Android/releases/download/v1.7.7-Beta"
 
     /**
      * FCL 下载站镜像（作者自建的 Android/bionic JRE 归档，arm64）。

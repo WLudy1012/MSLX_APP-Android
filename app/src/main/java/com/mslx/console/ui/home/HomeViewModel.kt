@@ -325,7 +325,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val stale = monitorClients.keys.filterNot { it in onlineIds }
         stale.forEach { id ->
             val client = monitorClients.remove(id)
-            if (client != null) viewModelScope.launch(Dispatchers.IO) { runCatching { client.disconnect() } }
+            if (client != null) runCatching { client.close() }
         }
 
         onlineIds.filterNot { it in monitorClients }.forEach { id -> startMonitor(id) }
@@ -411,9 +411,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         val clients = monitorClients.values.toList()
         monitorClients.clear()
-        viewModelScope.launch(Dispatchers.IO) {
-            clients.forEach { runCatching { it.disconnect() } }
-        }
+        clients.forEach { runCatching { it.close() } }
         super.onCleared()
     }
 }

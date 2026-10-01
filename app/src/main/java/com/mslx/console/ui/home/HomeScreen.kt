@@ -147,6 +147,7 @@ fun HomeScreen(
                         )
                     }
                 }
+                item { QuoteCard(state) }
                 item {
                     DaemonPagerSection(
                         state = state,
@@ -178,8 +179,6 @@ fun HomeScreen(
                         )
                     }
                 }
-
-                item { QuoteCard(state) }
 
                 item {
                     Row(

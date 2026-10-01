@@ -3,6 +3,8 @@ package com.mslx.console.ui.settings
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -40,6 +42,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -75,7 +78,23 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = viewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val daemonStatuses by viewModel.daemonStatuses.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<DaemonConfig?>(null) }
+    var backupMode by remember { mutableStateOf<String?>(null) }
+    var backupPassword by remember { mutableStateOf("") }
+    var importUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val createBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri != null) viewModel.exportBackup(uri, backupPassword)
+        backupPassword = ""
+        backupMode = null
+    }
+    val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            importUri = uri
+            backupPassword = ""
+            backupMode = "import"
+        }
+    }
 
     // 手动检查更新：必须与 MainActivity 的 UpdateHost 共用同一个 activity 作用域 ViewModel
     val activity = LocalContext.current.findActivity()
@@ -88,6 +107,9 @@ fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
         updateViewModel.message.collect { snackbarHostState.showSnackbar(it) }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.message.collect { snackbarHostState.showSnackbar(it) }
     }
     val ctx = LocalContext.current
     val versionName = remember {
@@ -194,6 +216,18 @@ fun SettingsScreen(
                         subtitle = "内存、JVM 参数、后台保活、Java 运行时",
                         onClick = onOpenLocalServerSettings,
                     )
+                    EntryRow(
+                        icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "导出应用数据",
+                        subtitle = "加密迁移 Daemon 配置与本机实例",
+                        onClick = { backupMode = "export"; backupPassword = "" },
+                    )
+                    EntryRow(
+                        icon = { Icon(Icons.Filled.Add, null, tint = MaterialTheme.colorScheme.primary) },
+                        title = "导入应用数据",
+                        subtitle = "从加密备份恢复配置与实例文件",
+                        onClick = { openBackup.launch(arrayOf("application/octet-stream", "application/zip", "*/*")) },
+                    )
                 }
             }
 
@@ -267,6 +301,7 @@ fun SettingsScreen(
                         settings.daemons.forEach { daemon ->
                             DaemonRow(
                                 daemon = daemon,
+                                status = daemonStatuses[daemon.id],
                                 isActive = daemon.id == settings.activeDaemonId,
                                 onSelect = { viewModel.setActiveDaemon(daemon.id) },
                                 onEdit = { onEditDaemon(daemon.id) },
@@ -307,6 +342,35 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("取消") }
             },
+        )
+    }
+
+    backupMode?.let { mode ->
+        AlertDialog(
+            onDismissRequest = { backupMode = null; backupPassword = "" },
+            title = { Text(if (mode == "export") "设置备份口令" else "输入备份口令") },
+            text = {
+                OutlinedTextField(
+                    value = backupPassword,
+                    onValueChange = { backupPassword = it },
+                    label = { Text("口令（至少 8 位）") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = backupPassword.length >= 8,
+                    onClick = {
+                        if (mode == "export") {
+                            createBackup.launch("mslx-backup.mslxb")
+                        } else {
+                            importUri?.let { viewModel.importBackup(it, backupPassword) }
+                            backupMode = null
+                        }
+                    },
+                ) { Text(if (mode == "export") "选择保存位置" else "导入") }
+            },
+            dismissButton = { TextButton(onClick = { backupMode = null }) { Text("取消") } },
         )
     }
 
@@ -386,6 +450,7 @@ private fun EntryRow(
 @Composable
 private fun DaemonRow(
     daemon: DaemonConfig,
+    status: com.mslx.console.data.DaemonStatus?,
     isActive: Boolean,
     onSelect: () -> Unit,
     onEdit: () -> Unit,
@@ -406,13 +471,22 @@ private fun DaemonRow(
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
             )
-            if (daemon.name.isNotBlank()) {
-                Text(
-                    text = daemon.baseUrl,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                text = buildString {
+                    append(daemon.baseUrl)
+                    if (daemon.endpoints.isNotEmpty()) append(" · 备用地址 ${daemon.endpoints.size} 个")
+                    status?.let {
+                        append(" · ").append(it.stateText)
+                        it.latencyMs?.let { latency -> append(" ${latency}ms") }
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = when (status?.state) {
+                    com.mslx.console.data.DaemonState.ONLINE -> MaterialTheme.colorScheme.primary
+                    com.mslx.console.data.DaemonState.OFFLINE -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
         }
         IconButton(onClick = onEdit) {
             Icon(

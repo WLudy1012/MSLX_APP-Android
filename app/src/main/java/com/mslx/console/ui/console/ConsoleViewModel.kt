@@ -309,7 +309,7 @@ class ConsoleViewModel(
         val hub = client
         client = null
         if (hub != null) {
-            viewModelScope.launch(Dispatchers.IO) { hub.disconnect() }
+            runCatching { hub.close() }
         }
     }
 }

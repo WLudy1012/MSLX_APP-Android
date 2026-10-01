@@ -8,6 +8,7 @@ import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppLogger
 import com.mslx.console.data.AppSettings
 import com.mslx.console.data.InstanceIcons
+import com.mslx.console.data.InstancePinStore
 import com.mslx.console.data.ManagedServer
 import com.mslx.console.data.ensureRepository
 import com.mslx.console.data.isStoppableStatus
@@ -33,6 +34,7 @@ data class InstancesUiState(
     val stoppingAll: Boolean = false,
     /** 操作结果提示（由 UI 弹 Snackbar 后调 [InstancesViewModel.clearActionMessage] 清空）。 */
     val actionMessage: String? = null,
+    val pinnedKeys: Set<String> = emptySet(),
 )
 
 /**
@@ -44,12 +46,21 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
     private val container = getApplication<MSLXApplication>().container
     private val catalog = container.serverCatalog
     private val store = container.settingsStore
+    private val pins = InstancePinStore(application)
 
     private val _state = MutableStateFlow(InstancesUiState())
     val state = _state.asStateFlow()
 
     init {
+        _state.update { it.copy(pinnedKeys = pins.load()) }
         refresh(initial = true)
+    }
+
+    fun togglePin(server: ManagedServer) {
+        val pinned = server.key !in _state.value.pinnedKeys
+        pins.setPinned(server.key, pinned)
+        _state.update { it.copy(pinnedKeys = it.pinnedKeys.toMutableSet().apply { if (pinned) add(server.key) else remove(server.key) }) }
+        refresh()
     }
 
     fun delete(server: ManagedServer, deleteFiles: Boolean, onDone: () -> Unit) {
@@ -197,10 +208,12 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
             val settings = runCatching { store.settingsFlow.first() }.getOrDefault(AppSettings())
             runCatching { catalog.load(settings) }
                 .onSuccess { servers ->
+                    val pinned = pins.load()
+                    val ordered = servers.sortedWith(compareByDescending<ManagedServer> { it.key in pinned }.thenBy { it.name.lowercase() })
                     // 图标加载失败不影响列表本身：逐条回退占位块
                     val icons = InstanceIcons.load(container, servers)
                     _state.update {
-                        it.copy(loading = false, refreshing = false, error = null, servers = servers, icons = it.icons + icons)
+                        it.copy(loading = false, refreshing = false, error = null, servers = ordered, pinnedKeys = pinned, icons = it.icons + icons)
                     }
                 }
                 .onFailure { e ->

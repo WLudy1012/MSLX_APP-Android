@@ -79,6 +79,28 @@ fun LocalServerSettingsScreen(
             )
             Spacer(Modifier.height(10.dp))
 
+            Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("局域网连接诊断", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = viewModel::refreshNetwork) { Text("刷新") }
+                    }
+                    Text(
+                        "网络：${state.network.transport} · 服务端端口默认 25565",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "可连接地址：${state.network.addressText}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(state.network.hotspotHint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(state.network.firewallHint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             // 本机 Java 运行时（JRE 安装/版本）
             Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -194,6 +216,20 @@ fun LocalServerSettingsScreen(
                         Switch(
                             checked = state.keepAlive,
                             onCheckedChange = { v -> viewModel.update { it.copy(keepAlive = v) } },
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("前台页面保持屏幕亮起", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "仅在 App 页面可见时生效；不申请后台点亮屏幕权限。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = state.keepScreenOn,
+                            onCheckedChange = { v -> viewModel.update { it.copy(keepScreenOn = v) } },
                         )
                     }
                 }

@@ -9,6 +9,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 
 /**
  * SignalR Hub 客户端基类：连接生命周期 + 断线自动重连。
@@ -45,6 +46,12 @@ abstract class ReconnectingHubClient(private val tag: String) {
     @Volatile
     private var reconnectJob: Job? = null
 
+    @Volatile
+    private var connectionGeneration = 0L
+
+    @Volatile
+    private var closed = false
+
     /** 构建 HubConnection 并注册业务回调（不得调用 start）。 */
     protected abstract fun buildConnection(): HubConnection
 
@@ -59,6 +66,7 @@ abstract class ReconnectingHubClient(private val tag: String) {
 
     /** 阻塞建连；失败抛出异常，由调用方决定提示方式；成功后连接由基类维持自愈。 */
     fun connect() {
+        check(!closed) { "SignalR 客户端已关闭" }
         stopped = false
         synchronized(connectLock) {
             ensureConnectedLocked()
@@ -72,6 +80,7 @@ abstract class ReconnectingHubClient(private val tag: String) {
         reconnectJob = null
         val connection: HubConnection?
         synchronized(connectLock) {
+            connectionGeneration++
             connection = hub
             hub = null
             isConnected = false
@@ -85,6 +94,14 @@ abstract class ReconnectingHubClient(private val tag: String) {
         }
     }
 
+    /** 释放重连作用域；仓储移除或应用退出时调用。 */
+    fun close() {
+        if (closed) return
+        closed = true
+        disconnect()
+        scope.cancel()
+    }
+
     /** 在持有 [connectLock] 的前提下建连（含旧连接清理）。 */
     private fun ensureConnectedLocked() {
         if (isConnected) return
@@ -92,14 +109,26 @@ abstract class ReconnectingHubClient(private val tag: String) {
         hub = null
         if (previous != null) runCatching { previous.stop().blockingAwait() }
         val connection = buildConnection()
+        val generation = ++connectionGeneration
+        hub = connection
         // onClosed 必须在 start 之前注册（Java 客户端只允许 Disconnected 状态下注册处理器）
         connection.onClosed { cause: Exception? ->
+            if (hub !== connection || generation != connectionGeneration) return@onClosed
+            hub = null
             isConnected = false
             onClosed(cause)
             scheduleReconnect()
         }
-        connection.start().blockingAwait()
-        hub = connection
+        try {
+            connection.start().blockingAwait()
+        } catch (error: Throwable) {
+            if (hub === connection && generation == connectionGeneration) {
+                hub = null
+                isConnected = false
+            }
+            runCatching { connection.stop().blockingAwait() }
+            throw error
+        }
         isConnected = true
         AppLogger.i(tag, "SignalR 连接建立")
         onOpened(connection)
@@ -107,9 +136,9 @@ abstract class ReconnectingHubClient(private val tag: String) {
 
     /** 连接意外关闭后按退避序列重连；用户主动 disconnect 则不重连。 */
     private fun scheduleReconnect() {
-        if (stopped || isConnected) return
+        if (closed || stopped || isConnected) return
         synchronized(connectLock) {
-            if (stopped || isConnected) return
+            if (closed || stopped || isConnected) return
             if (reconnectJob?.isActive == true) return
             reconnectJob = scope.launch {
                 var attempt = 0

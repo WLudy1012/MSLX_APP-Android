@@ -216,56 +216,50 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
-            // 校验重定向后的最终域名仍在白名单内，防止被 30x 跳转到非信任主机
-            val finalHost = response.request.url.host?.lowercase().orEmpty()
-            if (finalHost !in ALLOWED_DOWNLOAD_HOSTS) {
-                throw IllegalStateException("下载跳转到非信任域名：$finalHost")
-            }
-            val body = response.body ?: throw IllegalStateException("响应为空")
-            val total = body.contentLength()
-            val dir = File(context.filesDir, "apks").apply { mkdirs() }
-            val target = File(dir, "mslx-update.apk")
-            val partial = File(dir, "mslx-update.apk.part")
-            partial.delete()
-            val digest = MessageDigest.getInstance("SHA-256")
-            try {
-            body.byteStream().use { input ->
-                partial.outputStream().use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    var downloaded = 0L
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        if (read == 0) continue
-                        output.write(buffer, 0, read)
-                        digest.update(buffer, 0, read)
-                        downloaded += read
-                        if (total > 0) {
-                            _state.update { it.copy(downloadProgress = downloaded.toFloat() / total) }
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
+                val finalHost = response.request.url.host?.lowercase().orEmpty()
+                if (finalHost !in ALLOWED_DOWNLOAD_HOSTS) throw IllegalStateException("下载跳转到非信任域名：$finalHost")
+                val body = response.body ?: throw IllegalStateException("响应为空")
+                val total = body.contentLength()
+                val dir = File(context.filesDir, "apks").apply { mkdirs() }
+                val target = File(dir, "mslx-update.apk")
+                val partial = File(dir, "mslx-update.apk.part")
+                partial.delete()
+                val digest = MessageDigest.getInstance("SHA-256")
+                try {
+                    body.byteStream().use { input ->
+                        partial.outputStream().use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            var downloaded = 0L
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                if (read == 0) continue
+                                output.write(buffer, 0, read)
+                                digest.update(buffer, 0, read)
+                                downloaded += read
+                                if (total > 0) _state.update { it.copy(downloadProgress = downloaded.toFloat() / total) }
+                            }
+                            if (total >= 0 && downloaded != total) throw IllegalStateException("下载内容不完整：期望 $total 字节，实际 $downloaded 字节")
                         }
                     }
-                    if (total >= 0 && downloaded != total) {
-                        throw IllegalStateException("下载内容不完整：期望 $total 字节，实际 $downloaded 字节")
-                    }
+                    val actual = digest.digest().joinToString("") { "%02x".format(it) }
+                    if (!actual.equals(expectedSha256.trim(), ignoreCase = true)) throw IllegalStateException("APK SHA-256 校验失败")
+                    if (!hasZipMagic(partial)) throw IllegalStateException("下载内容不是有效的 APK")
+                    if (target.exists() && !target.delete()) throw IllegalStateException("无法替换旧 APK")
+                    if (!partial.renameTo(target)) throw IllegalStateException("无法提交已校验 APK")
+                    return target
+                } catch (error: Throwable) {
+                    partial.delete()
+                    throw error
                 }
             }
-            val actual = digest.digest().joinToString("") { "%02x".format(it) }
-            if (!actual.equals(expectedSha256.trim(), ignoreCase = true)) {
-                throw IllegalStateException("APK SHA-256 校验失败")
-            }
-            // 魔数校验：APK 为 ZIP 格式（PK\x03\x04），防止下载到错误内容仍触发安装器
-            if (!hasZipMagic(partial)) {
-                throw IllegalStateException("下载内容不是有效的 APK")
-            }
-            if (target.exists() && !target.delete()) throw IllegalStateException("无法替换旧 APK")
-            if (!partial.renameTo(target)) throw IllegalStateException("无法提交已校验 APK")
-            return target
-            } catch (error: Throwable) {
-                partial.delete()
-                throw error
-            }
+        } finally {
+            client.dispatcher.cancelAll()
+            client.dispatcher.executorService.shutdown()
+            client.connectionPool.evictAll()
         }
     }
 

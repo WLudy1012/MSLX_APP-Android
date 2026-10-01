@@ -20,6 +20,7 @@ import com.mslx.console.data.localengine.LocalStorage
 import com.mslx.console.data.model.CreateServerRequest
 import com.mslx.console.data.model.LocalJava
 import com.mslx.console.data.model.ServerCoreDownloadInfo
+import com.mslx.console.data.model.ServerCoreMirror
 import com.mslx.console.data.remote.CreationProgressClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -123,6 +124,7 @@ data class CreateInstanceUiState(
     val core: String = "",
     val coreUrl: String = "",
     val coreSha256: String = "",
+    val coreMirrors: List<ServerCoreMirror> = emptyList(),
     val coreFileKey: String = "",
     val onlineGameVersion: String = "",
     // 整合包
@@ -604,6 +606,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                 core = "$core-$version.jar",
                 coreUrl = info.url,
                 coreSha256 = info.sha256.orEmpty(),
+                coreMirrors = info.mirrors,
                 coreFileKey = "",
                 onlineGameVersion = version,
                 selectedJavaVersion = recommendedOnline ?: s.selectedJavaVersion,
@@ -622,7 +625,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun clearCoreSelection() {
-        _state.update { it.copy(core = "", coreUrl = "", coreSha256 = "", coreFileKey = "", onlineGameVersion = "") }
+        _state.update { it.copy(core = "", coreUrl = "", coreSha256 = "", coreMirrors = emptyList(), coreFileKey = "", onlineGameVersion = "") }
     }
 
     fun uploadCore(uri: Uri, fileName: String) {
@@ -639,7 +642,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                 },
             ).fold(
                 onSuccess = { key ->
-                    _state.update { it.copy(uploading = false, uploadProgress = 100, coreFileKey = key, core = fileName, coreUrl = "", coreSha256 = "") }
+                    _state.update { it.copy(uploading = false, uploadProgress = 100, coreFileKey = key, core = fileName, coreUrl = "", coreSha256 = "", coreMirrors = emptyList()) }
                     _message.tryEmit("核心文件上传成功")
                 },
                 onFailure = { e ->
@@ -751,6 +754,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                 packageLocalPath = s.packageLocalPath.ifBlank { null },
                 coreUrl = s.coreUrl.ifBlank { null },
                 coreSha256 = s.coreSha256.ifBlank { null },
+                coreMirrors = s.coreMirrors,
                 coreFileKey = s.coreFileKey.ifBlank { null },
             )
             3 -> CreateServerRequest(
@@ -764,6 +768,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                 path = s.path.ifBlank { null },
                 coreUrl = s.coreUrl.ifBlank { null },
                 coreSha256 = s.coreSha256.ifBlank { null },
+                coreMirrors = s.coreMirrors,
                 coreFileKey = s.coreFileKey.ifBlank { null },
             )
             else -> CreateServerRequest(
@@ -784,6 +789,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                 mcdrPipMirror = if (s.mode == 4) s.mcdrPipMirror.ifBlank { null } else null,
                 coreUrl = s.coreUrl.ifBlank { null },
                 coreSha256 = s.coreSha256.ifBlank { null },
+                coreMirrors = s.coreMirrors,
                 coreFileKey = s.coreFileKey.ifBlank { null },
             )
         }
@@ -868,9 +874,11 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                         CreationLog("实例目录：${LocalStorage.displayPath(context, placement.dir)}", null),
                 )
             }
-            LocalCoreInstaller(repository).installFromUrl(
-                url = s.coreUrl,
-                sha256 = s.coreSha256,
+            LocalCoreInstaller(repository).installFromUrls(
+                urls = buildList {
+                    add(s.coreUrl to s.coreSha256)
+                    s.coreMirrors.forEach { mirror -> add(mirror.url to (mirror.sha256 ?: s.coreSha256)) }
+                },
                 core = coreName,
                 version = s.onlineGameVersion,
                 serverDir = placement.dir,
@@ -933,6 +941,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
                 }
             }
         }
+        repository.trackHub(client)
         creationClient = client
         try {
             client.connect()

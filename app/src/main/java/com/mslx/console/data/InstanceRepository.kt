@@ -40,12 +40,19 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
 import retrofit2.HttpException
 import retrofit2.Response
+import okhttp3.OkHttpClient
+import java.util.concurrent.CopyOnWriteArrayList
 
 /** 实例相关的数据入口，封装 REST 调用与 SignalR 控制台客户端创建。 */
 class InstanceRepository {
 
     @Volatile
     private var api: MslxApi? = null
+
+    @Volatile
+    private var httpClient: OkHttpClient? = null
+
+    private val hubClients = CopyOnWriteArrayList<com.mslx.console.data.remote.ReconnectingHubClient>()
 
     @Volatile
     var baseUrl: String = ""
@@ -67,10 +74,41 @@ class InstanceRepository {
         val normalized = ApiClient.normalizeDaemonUrl(baseUrl, allowHttp)
         val trimmedKey = apiKey.trim()
         if (api != null && normalized == this.baseUrl && trimmedKey == this.apiKey) return
+        closeResources()
         this.baseUrl = normalized
         this.apiKey = trimmedKey
-        this.api = ApiClient.build(normalized, this.apiKey)
+        if (normalized.isBlank()) {
+            this.api = null
+            return
+        }
+        val connection = ApiClient.buildDaemonConnection(normalized, this.apiKey)
+        this.api = connection.api
+        this.httpClient = connection.client
         AppLogger.i("Repository", "configure: ${normalized.trimEnd('/')} allowHttp=$allowHttp")
+    }
+
+    /** 关闭本 Daemon 的 Hub、OkHttp 调度器、连接池和缓存。 */
+    fun close() {
+        closeResources()
+        api = null
+        baseUrl = ""
+        apiKey = ""
+    }
+
+    private fun closeResources() {
+        hubClients.forEach { runCatching { it.close() } }
+        hubClients.clear()
+        httpClient?.let { client ->
+            runCatching { client.dispatcher.cancelAll() }
+            runCatching { client.dispatcher.executorService.shutdown() }
+            runCatching { client.connectionPool.evictAll() }
+            runCatching { client.cache?.close() }
+        }
+        httpClient = null
+    }
+
+    fun trackHub(client: com.mslx.console.data.remote.ReconnectingHubClient) {
+        hubClients += client
     }
 
     private fun requireApi(): MslxApi =
@@ -420,14 +458,14 @@ class InstanceRepository {
         onLog: (String) -> Unit,
         onCommandResult: (CommandResultPayload) -> Unit,
         onEulaRequired: () -> Unit,
-    ): ConsoleHubClient =
-        ConsoleHubClient(baseUrl, apiKey, instanceId, onLog, onCommandResult, onEulaRequired)
+    ): ConsoleHubClient = ConsoleHubClient(baseUrl, apiKey, instanceId, onLog, onCommandResult, onEulaRequired)
+        .also { hubClients += it }
 
     /** 创建系统负载监视客户端(订阅 /api/hubs/system 的 ReceiveSystemStats)。 */
     fun createSystemMonitorClient(
         onStats: (com.mslx.console.data.model.NodeStatsPayload) -> Unit,
-    ): SystemMonitorClient =
-        SystemMonitorClient(baseUrl, apiKey, onStats)
+    ): SystemMonitorClient = SystemMonitorClient(baseUrl, apiKey, onStats)
+        .also { hubClients += it }
 
     // ---------------------------------------------------------------- 实例图标
 

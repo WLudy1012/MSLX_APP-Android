@@ -7,8 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppLogger
 import com.mslx.console.data.AppSettings
+import com.mslx.console.data.DaemonStatus
 import com.mslx.console.data.ThemeMode
 import com.mslx.console.data.UpdateChannel
+import com.mslx.console.data.localengine.LocalServerRuntime
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
@@ -16,6 +18,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -27,6 +31,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         SharingStarted.Eagerly,
         AppSettings(),
     )
+
+    val daemonStatuses = container.daemonRegistry.statuses
+    private val _message = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val message = _message.asSharedFlow()
 
     fun setTheme(mode: ThemeMode, seedColor: Long) {
         viewModelScope.launch {
@@ -88,6 +96,43 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             runCatching { store.setUpdateChannel(channel) }
                 .onFailure { AppLogger.w("Settings", "保存更新渠道失败", it) }
+        }
+    }
+
+    fun exportBackup(uri: Uri, password: String) {
+        viewModelScope.launch {
+            if (LocalServerRuntime.running.value) {
+                _message.emit("本机服务端正在运行，请先停止后再导出，以保证实例文件一致")
+                return@launch
+            }
+            val secret = password.toCharArray()
+            try {
+                container.backupManager.export(uri, secret)
+                    .onSuccess { _message.emit("备份导出完成") }
+                    .onFailure { _message.emit("备份导出失败：${it.message ?: "未知错误"}") }
+            } finally {
+                secret.fill('\u0000')
+            }
+        }
+    }
+
+    fun importBackup(uri: Uri, password: String) {
+        viewModelScope.launch {
+            if (LocalServerRuntime.running.value) {
+                _message.emit("本机服务端正在运行，请先停止后再导入")
+                return@launch
+            }
+            val secret = password.toCharArray()
+            try {
+                container.backupManager.import(uri, secret)
+                    .onSuccess {
+                        runCatching { syncRegistry() }
+                        _message.emit("已导入 ${it.instances} 个实例、${it.files} 个文件；请重新检查连接")
+                    }
+                    .onFailure { _message.emit("备份导入失败：${it.message ?: "口令错误或文件损坏"}") }
+            } finally {
+                secret.fill('\u0000')
+            }
         }
     }
 

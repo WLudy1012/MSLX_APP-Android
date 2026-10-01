@@ -89,3 +89,50 @@ private fun ansiColor(index: Int, bright: Boolean): Color = when (index) {
 /** 加粗字重。 */
 val AnsiSegment.ansiFontWeight: FontWeight
     get() = if (bold) FontWeight.Bold else FontWeight.Normal
+
+/** 支持 SignalR 分块到达的增量 ANSI 解析器。 */
+class AnsiStreamParser {
+    private var pending = ""
+    private var color: Color? = null
+    private var bold = false
+
+    fun append(chunk: String): List<AnsiSegment> {
+        val text = pending + chunk
+        pending = ""
+        val output = mutableListOf<AnsiSegment>()
+        val lines = text.split('\n')
+        lines.dropLast(1).forEach { line -> output += parseLine(line, keepState = true) }
+        val tail = lines.lastOrNull().orEmpty()
+        if (tail.contains('\u001B') && !tail.contains(ANSI_ESCAPE_REGEX)) {
+            pending = tail
+        } else if (tail.isNotEmpty()) {
+            output += parseLine(tail, keepState = true)
+        }
+        return output
+    }
+
+    private fun parseLine(line: String, keepState: Boolean): List<AnsiSegment> {
+        val matches = ANSI_ESCAPE_REGEX.findAll(line).toList()
+        if (matches.isEmpty()) return listOf(AnsiSegment(line, color, bold))
+        val segments = mutableListOf<AnsiSegment>()
+        var cursor = 0
+        matches.forEach { match ->
+            if (match.range.first > cursor) segments += AnsiSegment(line.substring(cursor, match.range.first), color, bold)
+            val params = match.value.substringAfter('\u001B').removePrefix("[").removeSuffix("m")
+                .split(';').mapNotNull { it.toIntOrNull() }
+            params.ifEmpty { listOf(0) }.forEach { code ->
+                when (code) {
+                    0 -> { color = null; bold = false }
+                    1 -> bold = true
+                    22 -> bold = false
+                    39 -> color = null
+                    in 30..37 -> color = ansiColor(code - 30, false)
+                    in 90..97 -> color = ansiColor(code - 90, true)
+                }
+            }
+            cursor = match.range.last + 1
+        }
+        if (cursor < line.length) segments += AnsiSegment(line.substring(cursor), color, bold)
+        return segments
+    }
+}

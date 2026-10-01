@@ -152,6 +152,7 @@ class InstanceSettingsViewModel(
                 updateClient?.disconnect()
             }
         }
+        repository.trackHub(client)
         updateClient = client
         try {
             client.connect()

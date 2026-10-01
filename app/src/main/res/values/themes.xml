@@ -21,7 +21,6 @@
         <item name="android:statusBarColor">@color/scan_background</item>
         <item name="android:navigationBarColor">@color/scan_background</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
         <item name="android:colorAccent">@color/scan_primary</item>
     </style>
 </resources>

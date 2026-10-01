@@ -27,6 +27,7 @@ data class ConnectUiState(
     val editingId: String? = null,
     val name: String = "",
     val baseUrl: String = "",
+    val endpointsText: String = "",
     val apiKey: String = "",
     val allowHttp: Boolean = false,
     val loading: Boolean = false,
@@ -78,6 +79,7 @@ class ConnectViewModel(
                             editingId = target.id,
                             name = target.name,
                             baseUrl = target.baseUrl,
+                            endpointsText = target.endpoints.joinToString("\n"),
                             apiKey = target.apiKey,
                             allowHttp = target.allowHttp,
                         )
@@ -91,6 +93,7 @@ class ConnectViewModel(
 
     fun onNameChange(value: String) = _state.update { it.copy(name = value, error = null) }
     fun onBaseUrlChange(value: String) = _state.update { it.copy(baseUrl = value, error = null) }
+    fun onEndpointsChange(value: String) = _state.update { it.copy(endpointsText = value, error = null) }
     fun onApiKeyChange(value: String) = _state.update { it.copy(apiKey = value, error = null) }
     fun onAllowHttpChange(value: Boolean) = _state.update { it.copy(allowHttp = value, error = null) }
 
@@ -103,12 +106,19 @@ class ConnectViewModel(
             return
         }
         val name = s.name.trim().ifBlank { baseUrl }
+        val endpoints = s.endpointsText
+            .lineSequence()
+            .map { normalizeBaseUrl(it, s.allowHttp) }
+            .filter { it.isNotBlank() && !it.equals(baseUrl, ignoreCase = true) }
+            .distinctBy { it.lowercase() }
+            .toList()
         val config = DaemonConfig(
             id = s.editingId ?: UUID.randomUUID().toString(),
             name = name,
             baseUrl = baseUrl,
             apiKey = apiKey,
             allowHttp = s.allowHttp,
+            endpoints = endpoints,
         )
         doConnect(config)
     }
@@ -128,10 +138,16 @@ class ConnectViewModel(
                 .getOrNull()
             val duplicate = settings?.daemons?.any {
                 it.id != config.id &&
-                    ApiClient.normalizeDaemonUrl(it.baseUrl, it.allowHttp).equals(
-                        ApiClient.normalizeDaemonUrl(config.baseUrl, config.allowHttp),
-                        ignoreCase = true,
-                    ) &&
+                    (listOf(it.baseUrl) + it.endpoints).map { endpoint ->
+                        ApiClient.normalizeDaemonUrl(endpoint, it.allowHttp)
+                    }.any { existing ->
+                        (listOf(config.baseUrl) + config.endpoints).any { candidate ->
+                            existing.equals(
+                                ApiClient.normalizeDaemonUrl(candidate, config.allowHttp),
+                                ignoreCase = true,
+                            )
+                        }
+                    } &&
                     it.apiKey == config.apiKey
             } == true
             if (duplicate) {
@@ -281,4 +297,9 @@ class ConnectViewModel(
 
     /** 关闭配对二维码弹窗。 */
     fun dismissPairCode() = _state.update { it.copy(pairCode = null) }
+
+    override fun onCleared() {
+        probeRepository.close()
+        super.onCleared()
+    }
 }

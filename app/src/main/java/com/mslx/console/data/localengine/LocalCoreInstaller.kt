@@ -89,4 +89,37 @@ class LocalCoreInstaller(
         ).getOrThrow()
         target to finalMeta
     }
+
+    suspend fun installFromUrls(
+        urls: List<Pair<String, String>>,
+        core: String,
+        version: String,
+        serverDir: File,
+        meta: LocalInstanceMeta,
+        onProgress: (Float) -> Unit = {},
+    ): Result<Pair<File, LocalInstanceMeta>> = runCatching {
+        val candidates = urls.filter { it.first.isNotBlank() && it.second.isNotBlank() }
+        require(candidates.isNotEmpty()) { "核心下载地址或 SHA-256 为空，拒绝安装" }
+        val target = File(serverDir, ServerFiles.SERVER_JAR_NAME)
+        var last: Throwable? = null
+        for ((index, candidate) in candidates.withIndex()) {
+            val (url, sha) = candidate
+            try {
+                serverDir.mkdirs()
+                withContext(Dispatchers.IO) {
+                    LocalDownloader.download(url, target, sha) { p ->
+                        onProgress(((index + p) / candidates.size).coerceIn(0f, 1f))
+                    }
+                }
+                last = null
+                break
+            } catch (error: Throwable) {
+                last = error
+                AppLogger.w("LocalCore", "核心下载源失败，尝试下一个", error)
+            }
+        }
+        last?.let { throw it } ?: error("核心下载失败")
+        val finalMeta = ServerFiles.complete(serverDir, meta.copy(core = core, coreVersion = version)).getOrThrow()
+        target to finalMeta
+    }
 }

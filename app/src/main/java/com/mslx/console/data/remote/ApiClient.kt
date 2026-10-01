@@ -14,6 +14,11 @@ import javax.net.ssl.X509TrustManager
 
 object ApiClient {
 
+    data class DaemonConnection(
+        val api: MslxApi,
+        val client: OkHttpClient,
+    )
+
     /**
      * 客户端 User-Agent：直接读 BuildConfig.VERSION_NAME，
      * 发版时不再需要手工同步版本号。
@@ -21,6 +26,10 @@ object ApiClient {
     private val USER_AGENT = "MSLX-Android/${BuildConfig.VERSION_NAME}"
 
     fun build(baseUrl: String, apiKey: String): MslxApi {
+        return buildDaemonConnection(baseUrl, apiKey).api
+    }
+
+    fun buildDaemonConnection(baseUrl: String, apiKey: String): DaemonConnection {
         val builder = OkHttpClient.Builder()
             .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
@@ -39,12 +48,13 @@ object ApiClient {
         configureDaemonHttpClient(builder)
         val client = builder.build()
 
-        return Retrofit.Builder()
+        val api = Retrofit.Builder()
             .baseUrl(ensureTrailingSlash(baseUrl))
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(MslxApi::class.java)
+        return DaemonConnection(api, client)
     }
 
     /**
@@ -101,7 +111,7 @@ object ApiClient {
     }
 
     /** 构建 MSLX 官方在线 API 客户端(无需认证)。 */
-    fun buildMslJavaApi(): MslJavaApi {
+    private fun buildMslJavaApiUncached(): MslJavaApi {
         val client = OkHttpClient.Builder()
             .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
@@ -123,7 +133,7 @@ object ApiClient {
     }
 
     /** 构建 MSLAPI v4 服务端核心接口客户端(无需认证)。 */
-    fun buildMslServerCoreApi(): MslServerCoreApi {
+    private fun buildMslServerCoreApiUncached(): MslServerCoreApi {
         val client = OkHttpClient.Builder()
             .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
@@ -145,7 +155,7 @@ object ApiClient {
     }
 
     /** 构建 Microsoft OpenJDK GitHub API 客户端(无需认证)。 */
-    fun buildMicrosoftJavaApi(): MicrosoftJavaApi {
+    private fun buildMicrosoftJavaApiUncached(): MicrosoftJavaApi {
         val client = OkHttpClient.Builder()
             .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
@@ -168,7 +178,7 @@ object ApiClient {
     }
 
     /** 构建 GitHub Releases API 客户端(公开仓库，无需认证)。 */
-    fun buildGitHubReleaseApi(): GitHubReleaseApi {
+    private fun buildGitHubReleaseApiUncached(): GitHubReleaseApi {
         val client = OkHttpClient.Builder()
             .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
@@ -191,7 +201,7 @@ object ApiClient {
     }
 
     /** 构建一言（Hitokoto）金句 API 客户端（公开接口，无需认证）。 */
-    fun buildHitokotoApi(): HitokotoApi {
+    private fun buildHitokotoApiUncached(): HitokotoApi {
         val client = OkHttpClient.Builder()
             .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
@@ -212,6 +222,18 @@ object ApiClient {
             .build()
             .create(HitokotoApi::class.java)
     }
+
+    private val mslJavaApi by lazy { buildMslJavaApiUncached() }
+    private val mslServerCoreApi by lazy { buildMslServerCoreApiUncached() }
+    private val microsoftJavaApi by lazy { buildMicrosoftJavaApiUncached() }
+    private val githubReleaseApi by lazy { buildGitHubReleaseApiUncached() }
+    private val hitokotoApi by lazy { buildHitokotoApiUncached() }
+
+    fun buildMslJavaApi(): MslJavaApi = mslJavaApi
+    fun buildMslServerCoreApi(): MslServerCoreApi = mslServerCoreApi
+    fun buildMicrosoftJavaApi(): MicrosoftJavaApi = microsoftJavaApi
+    fun buildGitHubReleaseApi(): GitHubReleaseApi = githubReleaseApi
+    fun buildHitokotoApi(): HitokotoApi = hitokotoApi
 
     /**
      * 构建第三方服务器状态查询客户端（mcsrvstat.us / mcstatus.io，公开接口无需认证）。
@@ -241,12 +263,13 @@ object ApiClient {
     }
 
     /** 第三方服务器状态 API：mcsrvstat.us（图标来源首选）。 */
-    fun buildMcsrvstatApi(): McsrvstatApi =
-        buildServerStatusApi("https://api.mcsrvstat.us/", McsrvstatApi::class.java)
+    private val mcsrvstatApi by lazy { buildServerStatusApi("https://api.mcsrvstat.us/", McsrvstatApi::class.java) }
+    private val mcstatusApi by lazy { buildServerStatusApi("https://api.mcstatus.io/", McstatusApi::class.java) }
+
+    fun buildMcsrvstatApi(): McsrvstatApi = mcsrvstatApi
 
     /** 第三方服务器状态 API：mcstatus.io（mcsrvstat.us 无结果时回退）。 */
-    fun buildMcstatusApi(): McstatusApi =
-        buildServerStatusApi("https://api.mcstatus.io/", McstatusApi::class.java)
+    fun buildMcstatusApi(): McstatusApi = mcstatusApi
 
     /**
      * 规范化 Daemon 地址：

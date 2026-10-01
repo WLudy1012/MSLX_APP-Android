@@ -44,6 +44,7 @@ import com.mslx.console.ui.settings.ServerPropertiesScreen
 import com.mslx.console.ui.settings.LocalServerSettingsScreen
 import com.mslx.console.ui.settings.SettingsScreen
 import com.mslx.console.ui.servers.ServersOverviewScreen
+import com.mslx.console.ui.servers.ResourceCenterScreen
 import com.mslx.console.ui.settings.AppearanceScreen
 import com.mslx.console.ui.settings.AboutScreen
 import com.mslx.console.ui.settings.LogViewerScreen
@@ -59,6 +60,7 @@ object Routes {
     const val HOME = "home"
     const val INSTANCES = "instances"
     const val SETTINGS = "settings"
+    const val RESOURCES = "resources"
     const val NEW_INSTANCE = "newInstance"
 
     // 二级页统一携带 daemonId：实例归属哪台服务端就操作哪台（去主连接）。
@@ -114,6 +116,7 @@ fun AppNavHost(
         TopPage.HOME -> Routes.HOME
         TopPage.INSTANCES -> Routes.INSTANCES
         TopPage.NEW_INSTANCE -> Routes.NEW_INSTANCE
+        TopPage.RESOURCES -> Routes.RESOURCES
         TopPage.SETTINGS -> Routes.SETTINGS
     }
 
@@ -143,6 +146,7 @@ fun AppNavHost(
         Routes.HOME -> TopPage.HOME
         Routes.INSTANCES -> TopPage.INSTANCES
         Routes.NEW_INSTANCE -> TopPage.NEW_INSTANCE
+        Routes.RESOURCES -> TopPage.RESOURCES
         Routes.SETTINGS -> TopPage.SETTINGS
         else -> null
     }
@@ -260,6 +264,12 @@ fun AppNavHost(
                     onOpenServer = { ref ->
                         navController.navigate(Routes.console(ref)) { launchSingleTop = true }
                     },
+                )
+            }
+
+            composable(Routes.RESOURCES) {
+                ResourceCenterScreen(
+                    onOpenCreate = { navigateTopLevel(Routes.NEW_INSTANCE) },
                 )
             }
 

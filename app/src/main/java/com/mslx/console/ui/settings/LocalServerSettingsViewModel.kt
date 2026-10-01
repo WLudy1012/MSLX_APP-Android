@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.mslx.console.MSLXApplication
 import com.mslx.console.data.AppLogger
 import com.mslx.console.data.localengine.LocalJreManager
+import com.mslx.console.data.localengine.LocalNetworkDiagnostics
+import com.mslx.console.data.localengine.LocalNetworkInfo
 import com.mslx.console.data.localengine.ShizukuController
 import com.mslx.console.data.localengine.ShizukuStatus
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +39,7 @@ class LocalServerSettingsViewModel(application: Application) : AndroidViewModel(
         val maxMem: String = "2048",
         val jvmArgs: String = "",
         val keepAlive: Boolean = true,
+        val keepScreenOn: Boolean = false,
         val useSerialGc: Boolean = true,
         val useShizuku: Boolean = false,
         val shizukuStatus: ShizukuStatus = ShizukuStatus.DEAD,
@@ -50,6 +53,7 @@ class LocalServerSettingsViewModel(application: Application) : AndroidViewModel(
         val jreError: String? = null,
         val loaded: Boolean = false,
         val message: String? = null,
+        val network: LocalNetworkInfo = LocalNetworkInfo(),
     )
 
     private val store = getApplication<MSLXApplication>().container.settingsStore
@@ -60,6 +64,7 @@ class LocalServerSettingsViewModel(application: Application) : AndroidViewModel(
     init {
         ShizukuController.init()
         refreshJre()
+        refreshNetwork()
         viewModelScope.launch {
             ShizukuController.status.collect { st ->
                 _state.update { it.copy(shizukuStatus = st, shizukuStatusText = statusText(st)) }
@@ -74,6 +79,7 @@ class LocalServerSettingsViewModel(application: Application) : AndroidViewModel(
                             maxMem = s.localMaxMemMb.toString(),
                             jvmArgs = s.localJvmArgs,
                             keepAlive = s.localKeepAlive,
+                            keepScreenOn = s.localKeepScreenOn,
                             useSerialGc = s.localUseSerialGc,
                             useShizuku = s.localUseShizuku,
                             loaded = true,
@@ -85,6 +91,10 @@ class LocalServerSettingsViewModel(application: Application) : AndroidViewModel(
                     _state.update { it.copy(loaded = true) }
                 }
         }
+    }
+
+    fun refreshNetwork() {
+        _state.update { it.copy(network = LocalNetworkDiagnostics.inspect(getApplication())) }
     }
 
     fun update(transform: (UiState) -> UiState) = _state.update(transform)
@@ -212,6 +222,7 @@ class LocalServerSettingsViewModel(application: Application) : AndroidViewModel(
                 maxMem = "2048",
                 jvmArgs = "",
                 keepAlive = true,
+                keepScreenOn = false,
                 useSerialGc = true,
                 message = "已填入推荐默认值，记得点保存",
             )
@@ -225,7 +236,7 @@ class LocalServerSettingsViewModel(application: Application) : AndroidViewModel(
         val lo = minOf(min, max)
         val hi = maxOf(min, max)
         viewModelScope.launch {
-            runCatching { store.setLocalServer(lo, hi, s.jvmArgs.trim(), s.keepAlive, s.useSerialGc) }
+            runCatching { store.setLocalServer(lo, hi, s.jvmArgs.trim(), s.keepAlive, s.useSerialGc, s.keepScreenOn) }
                 .onSuccess {
                     AppLogger.i("LocalSettings", "已保存本机开服设置: ${lo}-${hi}MB keepAlive=${s.keepAlive} serialGc=${s.useSerialGc}")
                     _state.update {

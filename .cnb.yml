@@ -147,10 +147,8 @@ $:
             [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
             echo "$SHA  $JRE" | sha256sum -c -
 
-        # Java 21/25 运行时不入库、不进 APK，只在发版时抓下来作为 Release 附件，
-        # 供客户端按「CNB → GitHub → FCL 直链」顺序下载。每个文件都做 SHA-256 校验。
-        # 这里故意硬失败：附件列表是静态的，缺文件会让上传步骤整体报错，
-        # 早失败比"APK 已签名但附件没传上"更容易发现。
+        # Java 21/25 运行时不入库、不进 APK。来源和摘要确认前只做可选探测，
+        # 不把缺失或未经验证的文件写入 Release 附件。
         - name: 获取可选运行时归档
           script: |
             set -eu
@@ -183,23 +181,23 @@ $:
               echo "ERROR: $name 下载或 SHA-256 校验失败（已尝试全部来源）" >&2
               return 1
             }
+            # 上游镜像不可用时不阻断 APK 构建；未取得可信归档就不生成附件，客户端仍会拒绝无摘要安装。
             fetch_verified \
               jre21-arm64-20260223-release.tar.xz \
               d055fc953771e6cfd2206ef770ca675d69b5e4cfd9f3f1e6820ba5820c3cc1dc \
               "https://pan.huang1111.cn/f/eWkQI1/jre21-arm64-20260223-release.tar.xz" \
-              "$GH_BASE/jre21-arm64-20260223-release.tar.xz"
+              "$GH_BASE/jre21-arm64-20260223-release.tar.xz" || echo "WARNING: Java 21 归档暂不可用，跳过附件"
             fetch_verified \
               jre25-arm64-20260223-release.tar.xz \
               0fdf6d19fe66ea61c12caa24bd655227ddb0d7d9c16c0f13281a7c2878635286 \
               "https://pan.huang1111.cn/f/5NOltm/jre25-arm64-20260223-release.tar.xz" \
-              "$GH_BASE/jre25-arm64-20260223-release.tar.xz"
+              "$GH_BASE/jre25-arm64-20260223-release.tar.xz" || echo "WARNING: Java 25 归档暂不可用，跳过附件"
             # Java 8 归档（ZalithLauncher 运行时）不在本流水线镜像：
             # 客户端 LocalJreManager 已内置 jsDelivr / raw.githubusercontent 直连兜底，
             # 这里再引入 jsDelivr 依赖只会让发版多一个可能失败的环节。
 
         # 同一 Release 发布两个变体：app-release.apk（完整版，内嵌 JRE）与
-        # app-release-lite.apk（精简版，不含 JRE）；JRE 归档本身也作为附件，
-        # 供精简版在应用内下载（客户端按 CNB → GitHub 顺序尝试）。
+        # app-release-lite.apk（精简版，不含 JRE）。
         - name: 构建签名 Release APK（完整版，内嵌 JRE）
           script: |
             set -eu
@@ -273,7 +271,7 @@ $:
               echo "| \`app-release.apk\` | **完整版**：内嵌 Android JRE 运行时，本机开服可离线使用 | $(du -m app-release.apk | awk '{print $1}') MB | \`$(sha256sum app-release.apk | awk '{print $1}')\` |"
               echo "| \`app-release-lite.apk\` | **精简版**：不含运行时，体积小；本机开服首次使用需联网下载约 36MB 运行时 | $(du -m app-release-lite.apk | awk '{print $1}') MB | \`$(sha256sum app-release-lite.apk | awk '{print $1}')\` |"
               echo ""
-              echo "附件里的 \`jre17-\*.tar.xz\` / \`jre21-\*.tar.xz\` / \`jre25-\*.tar.xz\` 是本机开服用的 Android 运行时归档（应用内自动拉取，无需手动安装）；Java 8 由客户端直接取上游 Zalith 运行时。"
+              echo "附件里的 \`jre17-*.tar.xz\` 是内嵌运行时副本；Java 21/25 归档尚未取得可验证来源，本次不生成对应附件，客户端会继续拒绝无摘要文件。"
               echo ""
               echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
             } > CNB_RELEASE.md
@@ -291,5 +289,3 @@ $:
               - app-release.apk
               - app-release-lite.apk
               - app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
-              - jre21-arm64-20260223-release.tar.xz
-              - jre25-arm64-20260223-release.tar.xz

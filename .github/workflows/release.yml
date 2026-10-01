@@ -98,8 +98,7 @@ jobs:
           ls -lh "$JRE"
 
       # Java 21/25 运行时不入库、不进 APK，只在发版时从上游
-      # 镜像抓一份挂成 Release 附件。GitHub 侧走“尽力而为”：失败只告警不阻断发布
-      # （下面 files 对不存在的文件会自动跳过），CNB 流水线那边才是硬校验。
+      # 镜像尽力获取。失败只告警，并由后续步骤动态排除缺失附件。
       - name: 获取 JRE 21 运行时归档
         run: |
           JRE21=jre21-arm64-20260223-release.tar.xz
@@ -239,7 +238,7 @@ jobs:
             echo "| \`app-release.apk\` | **完整版**：内嵌 Android JRE 运行时，本机开服可离线使用 | ${FULL_MB} MB | \`$FULL_SHA\` |"
             echo "| \`app-release-lite.apk\` | **精简版**：不含运行时，体积小；本机开服首次使用需联网下载约 36MB 运行时 | ${LITE_MB} MB | \`$LITE_SHA\` |"
             echo ""
-            echo "附件里的 \`jre17-*.tar.xz\` / \`jre21-*.tar.xz\` / \`jre25-*.tar.xz\` 是本机开服用的 Android 运行时归档（应用内自动拉取，无需手动安装）。"
+            echo "实际成功校验的 jre21/jre25 归档才会作为附件上传；缺失或摘要不匹配时不会生成空附件。"
             echo ""
             echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
             echo ""
@@ -250,15 +249,26 @@ jobs:
             echo "\`\`\`"
           } >> release_notes.md
 
+      - name: 准备 Release 附件清单
+        run: |
+          set -e
+          {
+            echo 'RELEASE_ASSETS<<MSLX_RELEASE_ASSETS'
+            echo 'app-release.apk'
+            echo 'app-release-lite.apk'
+            echo 'app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz'
+            for asset in jre21-arm64-20260223-release.tar.xz jre25-arm64-20260223-release.tar.xz; do
+              if [ -f "$asset" ]; then
+                echo "$asset"
+              fi
+            done
+            echo 'MSLX_RELEASE_ASSETS'
+          } >> "$GITHUB_ENV"
+
       - name: 上传 APK 到 Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            app-release.apk
-            app-release-lite.apk
-            app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
-            jre21-arm64-20260223-release.tar.xz
-            jre25-arm64-20260223-release.tar.xz
+          files: ${{ env.RELEASE_ASSETS }}
           body_path: release_notes.md
 
 

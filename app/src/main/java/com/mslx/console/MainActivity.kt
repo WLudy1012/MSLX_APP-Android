@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +67,14 @@ class MainActivity : ComponentActivity() {
             val settingsState by app.container.settingsStore.settingsFlow
                 .collectAsStateWithLifecycle(initialValue = null as AppSettings?)
             val settings = settingsState ?: AppSettings()
+            DisposableEffect(settings.localKeepScreenOn) {
+                if (settings.localKeepScreenOn) {
+                    window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+                onDispose { window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+            }
             val scope = rememberCoroutineScope()
             val context = LocalContext.current
             val navController = rememberNavController()

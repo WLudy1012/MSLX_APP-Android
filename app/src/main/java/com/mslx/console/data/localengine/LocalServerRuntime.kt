@@ -1,6 +1,7 @@
 package com.mslx.console.data.localengine
 
 import android.content.Context
+import android.os.PowerManager
 import com.mslx.console.data.AppLogger
 import com.mslx.console.localengine.NativeVm
 import kotlinx.coroutines.CoroutineScope
@@ -44,6 +45,9 @@ object LocalServerRuntime {
 
     @Volatile
     private var appContext: Context? = null
+
+    @Volatile
+    private var wakeLock: PowerManager.WakeLock? = null
 
     @Volatile
     var currentServerName: String = ""
@@ -128,6 +132,7 @@ object LocalServerRuntime {
         chosen.onExit = { code ->
             _running.value = false
             refreshJvmState()
+            releaseWakeLock()
             AppLogger.i("LocalEngine", "服务端退出 rc=$code（${chosen.kind}），停止前台服务")
             if (keepAlive) runCatching { LocalServerService.stop(app) }
         }
@@ -138,10 +143,12 @@ object LocalServerRuntime {
         if (keepAlive) {
             runCatching { LocalServerService.start(app) }
                 .onFailure { AppLogger.w("LocalEngine", "启动前台服务失败（不影响服务端运行）", it) }
+            acquireWakeLock(app)
         }
         val ok = withContext(Dispatchers.IO) { chosen.start() }
         if (!ok) {
             engine = null
+            releaseWakeLock()
             if (keepAlive) runCatching { LocalServerService.stop(app) }
             throw IllegalStateException("启动失败，详见日志")
         }
@@ -154,6 +161,23 @@ object LocalServerRuntime {
     fun stop() {
         val current = engine ?: return
         scope.launch { withContext(Dispatchers.IO) { current.stop() } }
+    }
+
+    private fun acquireWakeLock(context: Context) {
+        if (wakeLock?.isHeld == true) return
+        val manager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+        wakeLock = runCatching {
+            manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MSLX:LocalServer").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.onFailure { AppLogger.w("LocalEngine", "申请 CPU 唤醒锁失败", it) }.getOrNull()
+    }
+
+    private fun releaseWakeLock() {
+        val lock = wakeLock ?: return
+        wakeLock = null
+        runCatching { if (lock.isHeld) lock.release() }
     }
 
     /** 用户离开 App/任务被划掉时不做任何事：前台服务会让进程继续存活。 */

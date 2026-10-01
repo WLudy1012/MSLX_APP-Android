@@ -24,6 +24,7 @@ data class CreateServerRequest(
     @SerializedName("mcdrPipMirror") val mcdrPipMirror: String? = null,
     @SerializedName("coreUrl") val coreUrl: String? = null,
     @SerializedName("coreSha256") val coreSha256: String? = null,
+    @SerializedName("coreMirrors") val coreMirrors: List<ServerCoreMirror> = emptyList(),
     @SerializedName("coreFileKey") val coreFileKey: String? = null,
     @SerializedName("packageUrl") val packageUrl: String? = null,
     @SerializedName("packageSha256") val packageSha256: String? = null,
@@ -62,6 +63,12 @@ data class ServerCoreGameVersion(
 
 /** MSLAPI v4 /download/server/{name}/{version} 下载信息。 */
 data class ServerCoreDownloadInfo(
+    @SerializedName("url") val url: String = "",
+    @SerializedName("sha256") val sha256: String? = null,
+    @SerializedName("mirrors") val mirrors: List<ServerCoreMirror> = emptyList(),
+)
+
+data class ServerCoreMirror(
     @SerializedName("url") val url: String = "",
     @SerializedName("sha256") val sha256: String? = null,
 )

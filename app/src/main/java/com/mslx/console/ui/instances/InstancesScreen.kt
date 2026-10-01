@@ -3,6 +3,8 @@ package com.mslx.console.ui.instances
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,11 +25,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,7 +73,7 @@ import com.mslx.console.ui.MslxCard
 import com.mslx.console.ui.MslxEmptyState
 import com.mslx.console.ui.statusColor
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun InstancesScreen(
     onOpenHome: () -> Unit,
@@ -79,6 +85,7 @@ fun InstancesScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<ManagedServer?>(null) }
+    var menuServer by remember { mutableStateOf<ManagedServer?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // 启停/停全部的结果提示：弹一次 Snackbar 后请 VM 清空，避免旋转屏/重组重复弹
@@ -171,8 +178,8 @@ fun InstancesScreen(
                                     icon = state.icons[server.key],
                                     busy = server.key in state.busyKeys,
                                     onClick = { server.ref?.let(onOpenServer) },
-                                    onToggle = { viewModel.toggle(server, start = !server.running) },
-                                    onDelete = { pendingDelete = server },
+                                    onMenu = { menuServer = server },
+                                    onLongPress = { menuServer = server },
                                     modifier = Modifier.animateItem(),
                                 )
                             }
@@ -180,6 +187,18 @@ fun InstancesScreen(
                     }
                 }
             }
+        }
+    }
+    menuServer?.let { server ->
+        DropdownMenu(expanded = true, onDismissRequest = { menuServer = null }) {
+            DropdownMenuItem(
+                text = { Text(if (server.key in state.pinnedKeys) "取消置顶" else "置顶实例") },
+                onClick = { viewModel.togglePin(server); menuServer = null },
+            )
+            DropdownMenuItem(
+                text = { Text("删除实例") },
+                onClick = { pendingDelete = server; menuServer = null },
+            )
         }
     }
     pendingDelete?.let { target ->
@@ -218,21 +237,22 @@ fun InstancesScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun InstanceCard(
     server: ManagedServer,
     icon: Bitmap?,
     busy: Boolean,
     onClick: () -> Unit,
-    onToggle: () -> Unit,
-    onDelete: () -> Unit,
+    onMenu: () -> Unit,
+    onLongPress: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val statusCode = server.status
     MslxCard(
-        onClick = onClick,
+        onClick = null,
         highlighted = server.running,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongPress),
     ) {
         Row(
             modifier = Modifier
@@ -299,20 +319,8 @@ private fun InstanceCard(
                     }
                 }
             }
-            // 启停：按实例归属的 ServerRef 下发，进行中的那一行显进度
-            TextButton(onClick = onToggle, enabled = !busy) {
-                if (busy) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Text(
-                        text = if (server.running) "停止" else "启动",
-                        color = if (server.running) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Filled.Delete, contentDescription = "删除实例", tint = MaterialTheme.colorScheme.error)
+            IconButton(onClick = onMenu) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "实例操作")
             }
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,

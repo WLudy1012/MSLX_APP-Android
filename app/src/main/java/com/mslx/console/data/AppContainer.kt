@@ -11,6 +11,8 @@ class AppContainer(context: Context) {
 
     val settingsStore = SettingsStore(appContext)
 
+    val backupManager = BackupManager(appContext, settingsStore)
+
     val updateRepository = UpdateRepository()
 
     /** 本机开服协调器：按目录名启停本机实例、发送控制台命令（委托进程级 [LocalServerRuntime]）。 */

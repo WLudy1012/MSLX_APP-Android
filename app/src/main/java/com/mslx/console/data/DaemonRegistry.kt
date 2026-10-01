@@ -1,8 +1,10 @@
 package com.mslx.console.data
 
+import com.mslx.console.data.remote.ApiClient
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +26,10 @@ data class DaemonStatus(
     val version: String? = null,
     val instanceCount: Int? = null,
     val latencyMs: Long? = null,
+    /** 当前健康探测选中的地址。 */
+    val activeBaseUrl: String? = null,
+    /** 备用地址探测结果，供设置页展示诊断。 */
+    val endpointLatencies: Map<String, Long> = emptyMap(),
     /** 宿主系统信息（来自 /api/status，供主页 Daemon 卡片展示）。 */
     val osType: String? = null,
     val osArchitecture: String? = null,
@@ -53,6 +59,8 @@ class DaemonRegistry {
 
     /** daemonId → 该 Daemon 的独立连接。 */
     private val repositories = ConcurrentHashMap<String, InstanceRepository>()
+    private val lastEndpoint = ConcurrentHashMap<String, String>()
+    private val lastSwitchAt = ConcurrentHashMap<String, Long>()
 
     private val _statuses = MutableStateFlow<Map<String, DaemonStatus>>(emptyMap())
     val statuses: StateFlow<Map<String, DaemonStatus>> = _statuses.asStateFlow()
@@ -66,7 +74,11 @@ class DaemonRegistry {
      */
     fun sync(settings: AppSettings) {
         val ids = settings.daemons.map { it.id }.toSet()
-        repositories.keys.retainAll(ids)
+        repositories.keys.toList().filter { it !in ids }.forEach { id ->
+            repositories.remove(id)?.close()
+            lastEndpoint.remove(id)
+            lastSwitchAt.remove(id)
+        }
 
         settings.daemons.forEach { daemon ->
             // 配置变更判定已下沉到 InstanceRepository.configure（内部早退），此处直接调用
@@ -93,6 +105,14 @@ class DaemonRegistry {
     /** 全部已配置 Daemon 的连接（供多路订阅/聚合场景使用）。 */
     fun allRepositories(): Map<String, InstanceRepository> = repositories.toMap()
 
+    fun close() {
+        repositories.values.forEach { it.close() }
+        repositories.clear()
+        lastEndpoint.clear()
+        lastSwitchAt.clear()
+        _statuses.value = emptyMap()
+    }
+
     /** 并行刷新所有 Daemon 的状态（在线/版本/实例数/延迟）。 */
     suspend fun refreshAll(settings: AppSettings) {
         // 先补齐条目，保证 UI 立刻能看到所有已配置 Daemon
@@ -116,19 +136,61 @@ class DaemonRegistry {
     /** 刷新单个 Daemon 状态。 */
     suspend fun refreshOne(config: DaemonConfig, isDefault: Boolean = false) {
         val repository = repositoryFor(config.id) ?: return
-        val startedAt = System.currentTimeMillis()
-        val verify = repository.verify()
-        val latency = System.currentTimeMillis() - startedAt
+        val candidates = listOf(config.baseUrl) + config.endpoints
+        val endpoints = candidates
+            .map { ApiClient.normalizeDaemonUrl(it, config.allowHttp) }
+            .filter { it.isNotBlank() }
+            .distinct()
+        val results = coroutineScope {
+            endpoints.map { endpoint ->
+                async(Dispatchers.IO) {
+                    val probe = InstanceRepository().apply { configure(endpoint, config.apiKey, config.allowHttp) }
+                    try {
+                        val started = System.currentTimeMillis()
+                        val verify = probe.verify()
+                        val latency = System.currentTimeMillis() - started
+                        if (verify.isFailure) {
+                            EndpointProbe(endpoint, latency, verify)
+                        } else {
+                            EndpointProbe(
+                                endpoint = endpoint,
+                                latencyMs = latency,
+                                result = Result.success(Unit),
+                                status = probe.getStatus().getOrNull(),
+                                instanceCount = probe.listInstances().getOrNull()?.size,
+                            )
+                        }
+                    } finally {
+                        probe.close()
+                    }
+                }
+            }.awaitAll()
+        }
+        val successful = results.filter { it.result.isSuccess }.sortedBy { it.latencyMs }
+        val fastest = successful.firstOrNull()
+        val previousEndpoint = lastEndpoint[config.id]
+        val previous = previousEndpoint?.let { endpoint -> successful.firstOrNull { it.endpoint == endpoint } }
+        val now = System.currentTimeMillis()
+        val selected = when {
+            previous == null -> fastest
+            fastest == null -> previous
+            previous.latencyMs <= (fastest.latencyMs * 1.15).toLong().coerceAtLeast(fastest.latencyMs + 1) -> previous
+            now - (lastSwitchAt[config.id] ?: 0L) < ENDPOINT_SWITCH_COOLDOWN_MS -> previous
+            else -> fastest
+        }
+        val latency = selected?.latencyMs ?: results.minOfOrNull { it.latencyMs } ?: 0L
         val checkedAt = System.currentTimeMillis()
 
-        if (verify.isFailure) {
+        if (selected == null) {
+            val failure = results.firstOrNull()?.result?.exceptionOrNull()
             _statuses.update { map ->
                 map + (config.id to DaemonStatus(
                     id = config.id,
                     name = config.name,
                     state = DaemonState.OFFLINE,
-                    message = verify.exceptionOrNull()?.message ?: "连接失败",
+                    message = failure?.message ?: "连接失败",
                     latencyMs = latency,
+                    endpointLatencies = results.associate { it.endpoint to it.latencyMs },
                     isDefault = isDefault,
                     checkedAt = checkedAt,
                 ))
@@ -136,8 +198,13 @@ class DaemonRegistry {
             return
         }
 
-        val status = repository.getStatus().getOrNull()
-        val instanceCount = repository.listInstances().getOrNull()?.size
+        repository.configure(selected.endpoint, config.apiKey, config.allowHttp)
+        if (previousEndpoint != selected.endpoint) {
+            lastEndpoint[config.id] = selected.endpoint
+            lastSwitchAt[config.id] = now
+        }
+        val status = selected.status
+        val instanceCount = selected.instanceCount
         _statuses.update { map ->
             map + (config.id to DaemonStatus(
                 id = config.id,
@@ -146,6 +213,8 @@ class DaemonRegistry {
                 version = status?.version,
                 instanceCount = instanceCount,
                 latencyMs = latency,
+                activeBaseUrl = selected.endpoint,
+                endpointLatencies = results.associate { it.endpoint to it.latencyMs },
                 osType = status?.systemInfo?.osType,
                 osArchitecture = status?.systemInfo?.osArchitecture,
                 isDefault = isDefault,
@@ -154,4 +223,17 @@ class DaemonRegistry {
         }
         AppLogger.i("DaemonRegistry", "Daemon 在线：${config.name.ifBlank { config.id }} v${status?.version ?: "?"} ${latency}ms")
     }
+
+    private data class EndpointProbe(
+        val endpoint: String,
+        val latencyMs: Long,
+        val result: Result<Unit>,
+        val status: com.mslx.console.data.model.StatusData? = null,
+        val instanceCount: Int? = null,
+    )
+
+    private companion object {
+        const val ENDPOINT_SWITCH_COOLDOWN_MS = 60_000L
+    }
+
 }
