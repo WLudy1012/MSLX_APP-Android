@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    MSLX-Android local signed release packer (two variants in one run).
+    Rolithax Launcher local signed release packer (two variants in one run).
 
 .DESCRIPTION
     Builds BOTH release variants with the local keystore and archives them:
@@ -12,7 +12,7 @@
 
 .EXAMPLE
     .\pack-release.ps1                       # build current versionName (from gradle)
-    .\pack-release.ps1 -VersionName 1.6.3    # override versionName via -PversionName
+    .\pack-release.ps1 -VersionName 1.7.9    # override versionName via -PversionName
     .\pack-release.ps1 -Only full            # build a single variant
 
 .NOTES

@@ -175,7 +175,7 @@ class LocalJvmLauncher(
         runCatching {
             eula.writeText(
                 "#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\n" +
-                    "#MSLX-Android auto agreed\n" +
+                    "#Rolithax Launcher auto agreed\n" +
                     "eula=true\n",
             )
         }.onFailure { AppLogger.w("LocalEngine", "写入 eula.txt 失败", it) }

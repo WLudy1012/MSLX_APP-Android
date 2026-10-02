@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 
 /** 开服/关服通知条目（去主连接：以 [ServerRef] 定位，本机与远程走同一条通路）。 */
 data class ServerNotification(
@@ -132,6 +133,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Daemon 配置指纹：只有增删改连接才重做一轮全量刷新，避免改主题等写入触发网络风暴。 */
     private var daemonSignature: String? = null
+    private val reloadMutex = Mutex()
 
     init {
         loadQuote()
@@ -228,20 +230,25 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * [silent] 为 true 时不显示下拉刷新态（后台轮询用）。
      */
     private suspend fun reload(silent: Boolean = false) {
-        if (!silent) _state.update { it.copy(refreshing = true) }
-        runCatching { catalog.load(settings) }
-            .onSuccess { servers ->
-                _state.update { it.copy(refreshing = false, error = null, servers = servers) }
-                detectStatusChanges(servers)
-                loadIcons(servers)
-            }
-            .onFailure { e ->
-                AppLogger.w("Home", "聚合服务端列表失败", e)
-                _state.update { it.copy(refreshing = false, error = e.message ?: "加载失败") }
-            }
-        // catalog.load 内部已并行刷新各 Daemon 状态；此处据最新状态维护负载订阅并刷新页码
-        ensureMonitors()
-        publish()
+        if (!reloadMutex.tryLock()) return
+        try {
+            if (!silent) _state.update { it.copy(refreshing = true) }
+            runCatching { catalog.load(settings) }
+                .onSuccess { servers ->
+                    _state.update { it.copy(refreshing = false, error = null, servers = servers) }
+                    detectStatusChanges(servers)
+                    loadIcons(servers)
+                }
+                .onFailure { e ->
+                    AppLogger.w("Home", "聚合服务端列表失败", e)
+                    _state.update { it.copy(refreshing = false, error = e.message ?: "加载失败") }
+                }
+            // catalog.load 内部已并行刷新各 Daemon 状态；此处据最新状态维护负载订阅并刷新页码
+            ensureMonitors()
+            publish()
+        } finally {
+            reloadMutex.unlock()
+        }
     }
 
     /** 手动刷新（下拉刷新 / 卡片上的重连按钮共用的入口）。 */

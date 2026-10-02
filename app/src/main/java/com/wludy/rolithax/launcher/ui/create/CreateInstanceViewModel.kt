@@ -34,7 +34,7 @@ import kotlinx.coroutines.withContext
 
 /** 已同意 EULA 的 eula.txt 内容（与守护进程 AgreeEULA 写入格式一致）。 */
 private const val EULA_AGREED_CONTENT =
-    "#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\n#MSLX-Android auto agreed\neula=true\n"
+    "#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\n#Rolithax Launcher auto agreed\neula=true\n"
 
 /**
  * 「重按新建 tab 重置表单」的跨层事件通道：底部 Dock 在 NavHost 外层（AppNavHost），

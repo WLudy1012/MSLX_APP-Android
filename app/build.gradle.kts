@@ -24,9 +24,9 @@ android {
         applicationId = "com.wludy.rolithax.launcher"
         minSdk = 24
         targetSdk = 35
-        versionCode = 40
+        versionCode = 41
         // 本地打包脚本可通过 -PversionName 覆盖版本名。
-        versionName = (project.findProperty("versionName") as String?) ?: "1.7.8"
+        versionName = (project.findProperty("versionName") as String?) ?: "1.7.9"
 
         ndk {
             // arm64 真机 + x86_64 模拟器（本机开服调试用）

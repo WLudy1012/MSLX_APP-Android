@@ -1,4 +1,4 @@
-# MSLX Console ProGuard rules.
+# Rolithax Launcher ProGuard rules.
 
 # Keep Gson model fields used by the API / SignalR JSON payloads.
 -keep class com.wludy.rolithax.launcher.data.model.** { *; }

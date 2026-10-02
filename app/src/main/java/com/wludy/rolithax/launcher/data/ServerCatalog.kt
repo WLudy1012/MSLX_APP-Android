@@ -6,6 +6,7 @@ import com.wludy.rolithax.launcher.data.localengine.LocalServerRuntime
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Dispatchers
 
 /** 服务端来源：本机（App 内进程 JVM）或某台 Daemon。 */
 sealed interface ServerSource {
@@ -67,7 +68,7 @@ class ServerCatalog(
 
     suspend fun load(settings: AppSettings): List<ManagedServer> = coroutineScope {
         registry.refreshAll(settings)
-        val localDeferred = async { localServers() }
+        val localDeferred = async(Dispatchers.IO) { localServers() }
         val remoteDeferred = settings.daemons.map { daemon -> async { remoteServers(daemon) } }
         (listOf(localDeferred) + remoteDeferred).awaitAll().flatten()
     }
