@@ -57,8 +57,17 @@ main:
             export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
             chmod +x gradlew
             ./gradlew assembleDebug --no-daemon --stacktrace
-        - name: 列出 Debug APK
-          script: ls -lh app/build/outputs/apk/debug
+        - name: 收集 Debug APK
+          script: |
+            set -eu
+            ls -lh app/build/outputs/apk/debug
+            cp app/build/outputs/apk/debug/app-debug.apk ./app-debug.apk
+            ls -lh app-debug.apk
+        - name: 上传 Debug APK 附件
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - app-debug.apk
 
 $:
   tag_push:
@@ -100,6 +109,17 @@ $:
                 exit 1
               }
             fi
+        - name: 校验并解析当前 Tag
+          script: |
+            set -eu
+            git fetch --tags --force --quiet 2>/dev/null || true
+            CUR_TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]' | sort -V | tail -1 || true)
+            if [ -z "$CUR_TAG" ]; then
+              echo "ERROR: 当前 tag 不匹配 v[0-9]* 规则，终止发布流水线" >&2
+              exit 1
+            fi
+            echo "$CUR_TAG" > .cnb_release_tag
+            echo "当前 tag=$CUR_TAG"
         - name: 恢复签名密钥
           script: |
             set -eu
@@ -135,46 +155,6 @@ $:
             [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
             echo "$SHA  $JRE" | sha256sum -c -
 
-        - name: 获取可选运行时归档
-          script: |
-            set -eu
-            CUR_TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]' | sort -V | tail -1 || true)
-            [ -n "$CUR_TAG" ] || CUR_TAG="${CNB_BRANCH:-}"
-            echo "当前 tag=$CUR_TAG"
-            if [ -n "$CUR_TAG" ]; then
-              GH_BASE="https://github.com/WLudy1012/MSLX_APP-Android/releases/download/$CUR_TAG"
-            else
-              GH_BASE=""
-            fi
-            fetch_verified() {
-              name="$1"; sha="$2"; shift 2
-              for url in "$@"; do
-                [ -n "$url" ] || continue
-                for i in 1 2; do
-                  echo "下载 $name <- $url（第 $i 次）"
-                  if curl -fL --retry 2 --connect-timeout 20 --max-time 900 -o "$name" "$url" \
-                    && echo "$sha  $name" | sha256sum -c -; then
-                    ls -lh "$name"
-                    return 0
-                  fi
-                  rm -f "$name"
-                  sleep 5
-                done
-              done
-              echo "ERROR: $name 下载或 SHA-256 校验失败（已尝试全部来源）" >&2
-              return 1
-            }
-            fetch_verified \
-              jre21-arm64-20260223-release.tar.xz \
-              d055fc953771e6cfd2206ef770ca675d69b5e4cfd9f3f1e6820ba5820c3cc1dc \
-              "https://pan.huang1111.cn/f/eWkQI1/jre21-arm64-20260223-release.tar.xz" \
-              "$GH_BASE/jre21-arm64-20260223-release.tar.xz" || echo "WARNING: Java 21 归档暂不可用，跳过附件"
-            fetch_verified \
-              jre25-arm64-20260223-release.tar.xz \
-              0fdf6d19fe66ea61c12caa24bd655227ddb0d7d9c16c0f13281a7c2878635286 \
-              "https://pan.huang1111.cn/f/5NOltm/jre25-arm64-20260223-release.tar.xz" \
-              "$GH_BASE/jre25-arm64-20260223-release.tar.xz" || echo "WARNING: Java 25 归档暂不可用，跳过附件"
-
         - name: 构建签名 Release APK（完整版，内嵌 JRE）
           script: |
             set -eu
@@ -186,6 +166,7 @@ $:
             chmod +x gradlew
             ./gradlew assembleRelease --no-daemon --stacktrace
             cp app/build/outputs/apk/release/app-release.apk ./app-release.apk
+            unzip -l app-release.apk | grep -q 'assets/jre/' || { echo "ERROR: 完整版缺少内嵌 JRE" >&2; exit 1; }
 
         - name: 构建签名 Release APK（精简版，不含 JRE）
           script: |
@@ -195,19 +176,18 @@ $:
             export MSLX_MAVEN_GOOGLE_MIRROR=https://maven.aliyun.com/repository/google
             export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
             ./gradlew assembleRelease -PwithoutJre=true --no-daemon --stacktrace
-            cp app/build/outputs/apk/release/app-release.apk ./app-release-lite.apk
-            ls -lh app-release.apk app-release-lite.apk
-            unzip -l app-release.apk | grep -q 'assets/jre/' || { echo "ERROR: 完整版缺少内嵌 JRE" >&2; exit 1; }
-            if unzip -l app-release-lite.apk | grep -q 'assets/jre/'; then
-              echo "ERROR: 精简版不应包含内嵌 JRE" >&2; exit 1
+            SRC=app/build/outputs/apk/release/app-release.apk
+            if unzip -l "$SRC" | grep -q 'assets/jre/'; then
+              echo "ERROR: 精简版不应包含内嵌 JRE" >&2
+              exit 1
             fi
+            cp "$SRC" ./app-release-lite.apk
+            ls -lh app-release.apk app-release-lite.apk
 
         - name: 准备发布说明
           script: |
             set -eu
-            CUR_TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]' | sort -V | tail -1 || true)
-            [ -n "$CUR_TAG" ] || CUR_TAG="${CNB_BRANCH:-unknown}"
-            git fetch --tags --force --quiet 2>/dev/null || true
+            CUR_TAG=$(cat .cnb_release_tag)
             REV="$CUR_TAG"
             git rev-parse --verify --quiet "${CUR_TAG}^{commit}" > /dev/null || REV=HEAD
             IS_BETA=$(echo "$CUR_TAG" | grep -qiE -- '-beta$' && echo 1 || echo 0)
@@ -242,7 +222,7 @@ $:
               echo "| \`app-release.apk\` | **完整版**：内嵌 Android JRE 运行时，本机开服可离线使用 | $(du -m app-release.apk | awk '{print $1}') MB | \`$(sha256sum app-release.apk | awk '{print $1}')\` |"
               echo "| \`app-release-lite.apk\` | **精简版**：不含运行时，体积小；本机开服首次使用需联网下载约 36MB 运行时 | $(du -m app-release-lite.apk | awk '{print $1}') MB | \`$(sha256sum app-release-lite.apk | awk '{print $1}')\` |"
               echo ""
-              echo "附件里的 \`jre17-*.tar.xz\` 是内嵌运行时副本；Java 21/25 归档尚未取得可验证来源，本次不生成对应附件，客户端会继续拒绝无摘要文件。"
+              echo "附件里的 \`jre17-arm64-20210825-release.tar.xz\` 是内嵌运行时副本，供客户端按需使用。"
               echo ""
               echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
             } > CNB_RELEASE.md
