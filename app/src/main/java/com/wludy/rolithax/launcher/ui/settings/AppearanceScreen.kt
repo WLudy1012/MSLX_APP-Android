@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wludy.rolithax.launcher.data.ThemeMode
+import com.wludy.rolithax.launcher.data.ThemeBrightness
 import com.wludy.rolithax.launcher.ui.theme.GlassBackground
 import com.wludy.rolithax.launcher.ui.theme.GlassLevel
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
@@ -142,9 +143,43 @@ fun AppearanceScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 10.dp),
         ) {
+            GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("界面模式", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        "可跟随系统，也可以固定使用浅色或深色界面",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    ThemeOption(
+                        title = "跟随系统",
+                        subtitle = "自动匹配设备当前外观",
+                        selected = settings.themeBrightness == ThemeBrightness.SYSTEM,
+                        onClick = { viewModel.setThemeBrightness(ThemeBrightness.SYSTEM) },
+                    )
+                    ThemeOption(
+                        title = "浅色模式",
+                        subtitle = "使用明亮背景与深色文字",
+                        selected = settings.themeBrightness == ThemeBrightness.LIGHT,
+                        onClick = { viewModel.setThemeBrightness(ThemeBrightness.LIGHT) },
+                    )
+                    ThemeOption(
+                        title = "深色模式",
+                        subtitle = "使用深色表面并提高文字对比度",
+                        selected = settings.themeBrightness == ThemeBrightness.DARK,
+                        onClick = { viewModel.setThemeBrightness(ThemeBrightness.DARK) },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             // ---- 主题颜色 ----
             GlassSurface(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
+                    Text("主题配色", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.size(8.dp))
                     ThemeOption(
                         title = "动态取色 (Material You)",
                         subtitle = "跟随系统壁纸自动生成配色（Android 12+）",

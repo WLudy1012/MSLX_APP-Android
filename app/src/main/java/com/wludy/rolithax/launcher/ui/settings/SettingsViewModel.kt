@@ -9,6 +9,7 @@ import com.wludy.rolithax.launcher.data.AppLogger
 import com.wludy.rolithax.launcher.data.AppSettings
 import com.wludy.rolithax.launcher.data.DaemonStatus
 import com.wludy.rolithax.launcher.data.ThemeMode
+import com.wludy.rolithax.launcher.data.ThemeBrightness
 import com.wludy.rolithax.launcher.data.UpdateChannel
 import com.wludy.rolithax.launcher.data.localengine.LocalServerRuntime
 import java.io.File
@@ -40,6 +41,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             runCatching { store.setTheme(mode, seedColor) }
                 .onFailure { AppLogger.w("Settings", "保存主题失败", it) }
+        }
+    }
+
+    fun setThemeBrightness(brightness: ThemeBrightness) {
+        viewModelScope.launch {
+            runCatching { store.setThemeBrightness(brightness) }
+                .onFailure { AppLogger.w("Settings", "保存界面模式失败", it) }
         }
     }
 

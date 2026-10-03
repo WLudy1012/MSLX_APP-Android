@@ -6,7 +6,6 @@ import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -67,7 +66,7 @@ fun GlassBackground(
     config: ThemeConfig,
     modifier: Modifier = Modifier,
 ) {
-    val dark = isSystemInDarkTheme()
+    val dark = LocalRolithaxDarkTheme.current
     val level = remember { currentGlassLevel() }
     val path = if (dark) config.darkBackground else config.lightBackground
     val bitmap by rememberGlassBitmap(path = path, level = level)
@@ -138,10 +137,11 @@ fun GlassSurface(
 ) {
     val scheme = MaterialTheme.colorScheme
     val level = remember { currentGlassLevel() }
+    val dark = LocalRolithaxDarkTheme.current
     Box(
         modifier = modifier
             .clip(shape)
-            .background(scheme.surface.copy(alpha = (alpha * 0.92f).coerceIn(0f, 1f)))
+            .background(scheme.surface.copy(alpha = if (dark) maxOf(alpha, 0.94f) else (alpha * 0.92f).coerceIn(0f, 1f)))
             .border(1.dp, scheme.outlineVariant.copy(alpha = 0.58f), shape),
     ) {
         if (level == GlassLevel.FULL) {

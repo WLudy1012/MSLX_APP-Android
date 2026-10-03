@@ -233,7 +233,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (!reloadMutex.tryLock()) return
         try {
             if (!silent) _state.update { it.copy(refreshing = true) }
-            runCatching { catalog.load(settings) }
+            runCatching { catalog.load(settings, refreshDaemonStatuses = !silent) }
                 .onSuccess { servers ->
                     _state.update { it.copy(refreshing = false, error = null, servers = servers) }
                     detectStatusChanges(servers)
@@ -243,7 +243,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     AppLogger.w("Home", "聚合服务端列表失败", e)
                     _state.update { it.copy(refreshing = false, error = e.message ?: "加载失败") }
                 }
-            // catalog.load 内部已并行刷新各 Daemon 状态；此处据最新状态维护负载订阅并刷新页码
+            // 据最新状态维护负载订阅并刷新页码
             ensureMonitors()
             publish()
         } finally {

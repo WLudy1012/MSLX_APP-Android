@@ -219,6 +219,7 @@ class BackupManager(
                         daemons = settings.daemons,
                         activeDaemonId = settings.activeDaemonId,
                         themeMode = settings.themeMode,
+                        themeBrightness = settings.themeBrightness,
                         seedColor = settings.seedColor,
                         glassAlpha = settings.glassAlpha,
                         lightBackgroundPath = lightTarget.takeIf { it.isFile }?.absolutePath.orEmpty(),

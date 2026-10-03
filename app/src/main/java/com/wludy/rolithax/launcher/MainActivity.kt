@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -22,11 +23,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
 import com.wludy.rolithax.launcher.data.AppSettings
 import com.wludy.rolithax.launcher.data.ServerRef
+import com.wludy.rolithax.launcher.data.ThemeBrightness
 import com.wludy.rolithax.launcher.ui.ConnectivityHost
 import com.wludy.rolithax.launcher.ui.ServerNotificationHelper
 import com.wludy.rolithax.launcher.ui.navigation.AppNavHost
@@ -67,6 +70,18 @@ class MainActivity : ComponentActivity() {
             val settingsState by app.container.settingsStore.settingsFlow
                 .collectAsStateWithLifecycle(initialValue = null as AppSettings?)
             val settings = settingsState ?: AppSettings()
+            val darkTheme = when (settings.themeBrightness) {
+                ThemeBrightness.SYSTEM -> isSystemInDarkTheme()
+                ThemeBrightness.LIGHT -> false
+                ThemeBrightness.DARK -> true
+            }
+            DisposableEffect(darkTheme) {
+                WindowInsetsControllerCompat(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !darkTheme
+                    isAppearanceLightNavigationBars = !darkTheme
+                }
+                onDispose { }
+            }
             DisposableEffect(settings.localKeepScreenOn) {
                 if (settings.localKeepScreenOn) {
                     window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -110,7 +125,7 @@ class MainActivity : ComponentActivity() {
                 lightBackground = settings.lightBackgroundPath,
                 darkBackground = settings.darkBackgroundPath,
             )
-            RolithaxTheme(themeConfig = themeConfig) {
+            RolithaxTheme(darkTheme = darkTheme, themeConfig = themeConfig) {
                 CompositionLocalProvider(LocalGlassAlpha provides themeConfig.glassAlpha) {
                     Box(Modifier.fillMaxSize()) {
                         // 毛玻璃背景层：所有页面共用（页面 Scaffold 保持透明以透出背景）

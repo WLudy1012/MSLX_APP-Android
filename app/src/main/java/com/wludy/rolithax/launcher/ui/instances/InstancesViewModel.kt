@@ -53,14 +53,22 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         _state.update { it.copy(pinnedKeys = pins.load()) }
-        refresh(initial = true)
     }
 
     fun togglePin(server: ManagedServer) {
         val pinned = server.key !in _state.value.pinnedKeys
         pins.setPinned(server.key, pinned)
-        _state.update { it.copy(pinnedKeys = it.pinnedKeys.toMutableSet().apply { if (pinned) add(server.key) else remove(server.key) }) }
-        refresh()
+        _state.update { current ->
+            val pinnedKeys = current.pinnedKeys.toMutableSet().apply {
+                if (pinned) add(server.key) else remove(server.key)
+            }
+            current.copy(
+                pinnedKeys = pinnedKeys,
+                servers = current.servers.sortedWith(
+                    compareByDescending<ManagedServer> { it.key in pinnedKeys }.thenBy { it.name.lowercase() },
+                ),
+            )
+        }
     }
 
     fun delete(server: ManagedServer, deleteFiles: Boolean, onDone: () -> Unit) {
@@ -206,14 +214,27 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
         }
         viewModelScope.launch {
             val settings = runCatching { store.settingsFlow.first() }.getOrDefault(AppSettings())
-            runCatching { catalog.load(settings) }
+            runCatching { catalog.load(settings, refreshDaemonStatuses = false) }
                 .onSuccess { servers ->
                     val pinned = pins.load()
                     val ordered = servers.sortedWith(compareByDescending<ManagedServer> { it.key in pinned }.thenBy { it.name.lowercase() })
-                    // 图标加载失败不影响列表本身：逐条回退占位块
-                    val icons = InstanceIcons.load(container, servers)
                     _state.update {
-                        it.copy(loading = false, refreshing = false, error = null, servers = ordered, pinnedKeys = pinned, icons = it.icons + icons)
+                        val keys = ordered.mapTo(mutableSetOf(), ManagedServer::key)
+                        it.copy(
+                            loading = false,
+                            refreshing = false,
+                            error = null,
+                            servers = ordered,
+                            pinnedKeys = pinned,
+                            icons = it.icons.filterKeys(keys::contains),
+                        )
+                    }
+                    viewModelScope.launch {
+                        val icons = InstanceIcons.load(container, servers)
+                        _state.update { current ->
+                            val keys = current.servers.mapTo(mutableSetOf(), ManagedServer::key)
+                            current.copy(icons = current.icons + icons.filterKeys(keys::contains))
+                        }
                     }
                 }
                 .onFailure { e ->

@@ -97,7 +97,7 @@ fun InstancesScreen(
 
     // 每次回到本页(如新建实例完成后返回)时刷新实例列表
     LifecycleResumeEffect(Unit) {
-        viewModel.refresh()
+        viewModel.refresh(initial = state.servers.isEmpty())
         onPauseOrDispose { }
     }
 

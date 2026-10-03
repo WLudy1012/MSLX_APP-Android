@@ -82,8 +82,14 @@ class DaemonRegistry {
 
         settings.daemons.forEach { daemon ->
             // 配置变更判定已下沉到 InstanceRepository.configure（内部早退），此处直接调用
+            val configuredEndpoints = (listOf(daemon.baseUrl) + daemon.endpoints)
+                .map { ApiClient.normalizeDaemonUrl(it, daemon.allowHttp) }
+                .filter { it.isNotBlank() }
+            val endpoint = lastEndpoint[daemon.id]
+                ?.takeIf { it in configuredEndpoints }
+                ?: daemon.baseUrl
             repositories.getOrPut(daemon.id) { InstanceRepository() }
-                .configure(daemon.baseUrl, daemon.apiKey, daemon.allowHttp)
+                .configure(endpoint, daemon.apiKey, daemon.allowHttp)
         }
 
         _statuses.update { map ->

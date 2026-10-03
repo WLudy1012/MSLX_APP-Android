@@ -10,6 +10,8 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
@@ -51,6 +53,8 @@ val PresetColors = listOf(
     PresetColor("咖啡棕", 0xFF6D4C41),
     PresetColor("蓝灰", 0xFF546E7A),
 )
+
+val LocalRolithaxDarkTheme = staticCompositionLocalOf { false }
 
 private fun Color.lighten(fraction: Float) = lerp(this, Color.White, fraction.coerceIn(0f, 1f))
 private fun Color.darken(fraction: Float) = lerp(this, Color.Black, fraction.coerceIn(0f, 1f))
@@ -166,10 +170,12 @@ fun RolithaxTheme(
         darkTheme -> seedColorScheme(Color(themeConfig.seedColor), dark = true)
         else -> seedColorScheme(Color(themeConfig.seedColor), dark = false)
     }
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        shapes = MSLXShapes,
-        content = content,
-    )
+    CompositionLocalProvider(LocalRolithaxDarkTheme provides darkTheme) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            shapes = MSLXShapes,
+            content = content,
+        )
+    }
 }

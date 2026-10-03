@@ -34,6 +34,7 @@ data class DaemonConfig(
 )
 
 enum class ThemeMode { DYNAMIC, SEED }
+enum class ThemeBrightness { SYSTEM, LIGHT, DARK }
 
 /** 默认主题色：硫磺史莱姆黄绿（与 ui.theme.DEFAULT_SEED_COLOR 保持一致）。 */
 const val DEFAULT_SEED_COLOR = 0xFF9FA83A
@@ -56,6 +57,7 @@ data class AppSettings(
     val daemons: List<DaemonConfig> = emptyList(),
     val activeDaemonId: String? = null,
     val themeMode: ThemeMode = ThemeMode.SEED,
+    val themeBrightness: ThemeBrightness = ThemeBrightness.SYSTEM,
     val seedColor: Long = DEFAULT_SEED_COLOR,
     /** 毛玻璃面板不透明度（0.25-1.0，1.0 为不透明）。 */
     val glassAlpha: Float = DEFAULT_GLASS_ALPHA,
@@ -106,6 +108,7 @@ class SettingsStore(private val context: Context) {
         val DAEMONS_BACKUP = stringPreferencesKey("daemons_backup_corrupt")
         val ACTIVE_DAEMON = stringPreferencesKey("active_daemon")
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val THEME_BRIGHTNESS = stringPreferencesKey("theme_brightness")
         val SEED_COLOR = longPreferencesKey("seed_color")
         /** 主题色迁移标记：置位后老默认青蓝不再被重写为品牌新默认色。 */
         val SEED_COLOR_MIGRATED = booleanPreferencesKey("seed_color_migrated")
@@ -133,6 +136,11 @@ class SettingsStore(private val context: Context) {
             daemons = decoded?.daemons ?: emptyList(),
             activeDaemonId = prefs[Keys.ACTIVE_DAEMON]?.takeIf { it.isNotBlank() },
             themeMode = if (prefs[Keys.THEME_MODE] == "dynamic") ThemeMode.DYNAMIC else ThemeMode.SEED,
+            themeBrightness = when (prefs[Keys.THEME_BRIGHTNESS]) {
+                "light" -> ThemeBrightness.LIGHT
+                "dark" -> ThemeBrightness.DARK
+                else -> ThemeBrightness.SYSTEM
+            },
             // 老版本默认色(青蓝)在迁移前视为「未自定义」，统一升级为硫磺史莱姆品牌色。
             seedColor = prefs[Keys.SEED_COLOR]?.takeIf {
                 it != LEGACY_DEFAULT_SEED_COLOR || prefs[Keys.SEED_COLOR_MIGRATED] == true
@@ -165,6 +173,11 @@ class SettingsStore(private val context: Context) {
             prefs.remove(Keys.DAEMONS_BACKUP)
             prefs[Keys.ACTIVE_DAEMON] = next.activeDaemonId ?: ""
             prefs[Keys.THEME_MODE] = if (next.themeMode == ThemeMode.SEED) "seed" else "dynamic"
+            prefs[Keys.THEME_BRIGHTNESS] = when (next.themeBrightness) {
+                ThemeBrightness.SYSTEM -> "system"
+                ThemeBrightness.LIGHT -> "light"
+                ThemeBrightness.DARK -> "dark"
+            }
             prefs[Keys.SEED_COLOR] = next.seedColor
             prefs[Keys.SEED_COLOR_MIGRATED] = true
             prefs[Keys.GLASS_ALPHA] = next.glassAlpha
@@ -212,6 +225,9 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setTheme(mode: ThemeMode, seedColor: Long) =
         update { it.copy(themeMode = mode, seedColor = seedColor) }
+
+    suspend fun setThemeBrightness(brightness: ThemeBrightness) =
+        update { it.copy(themeBrightness = brightness) }
 
     /** 保存毛玻璃面板不透明度。 */
     suspend fun setGlassAlpha(alpha: Float) = update { it.copy(glassAlpha = alpha) }

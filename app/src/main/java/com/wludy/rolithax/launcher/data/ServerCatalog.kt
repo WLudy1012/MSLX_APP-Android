@@ -59,15 +59,15 @@ data class ManagedServer(
 
 /**
  * 服务端目录：并行聚合本机实例与所有已连接 Daemon 的实例列表，
- * 同时顺带刷新各 Daemon 的在线状态（[DaemonRegistry.refreshAll]）。
+ * 按需刷新各 Daemon 的在线状态；实例列表不依赖状态探测完成。
  */
 class ServerCatalog(
     private val registry: DaemonRegistry,
     private val contextProvider: () -> Context,
 ) {
 
-    suspend fun load(settings: AppSettings): List<ManagedServer> = coroutineScope {
-        registry.refreshAll(settings)
+    suspend fun load(settings: AppSettings, refreshDaemonStatuses: Boolean = true): List<ManagedServer> = coroutineScope {
+        if (refreshDaemonStatuses) registry.refreshAll(settings) else registry.sync(settings)
         val localDeferred = async(Dispatchers.IO) { localServers() }
         val remoteDeferred = settings.daemons.map { daemon -> async { remoteServers(daemon) } }
         (listOf(localDeferred) + remoteDeferred).awaitAll().flatten()
