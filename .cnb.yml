@@ -1,6 +1,6 @@
 # CNB（cnb.cool）云构建配置：main push 构建 debug APK；v* tag 推送时构建签名 release APK 并发布 CNB Release。
-# tag 流水线从 CNB 项目环境变量读取签名密钥（KEYSTORE_BASE64/KEYSTORE_PASSWORD/KEY_PASSWORD）。
-# 未配置时安全失败，不发布未签名包，应用端会自动回退 GitHub 下载。
+# tag 流水线从密钥仓库 MSLX-secrets 的 keystore.yml 导入签名密钥
+# （KEYSTORE_BASE64/KEYSTORE_PASSWORD/KEY_PASSWORD），未配置时安全失败，不发布未签名包。
 
 main:
   push:
@@ -8,19 +8,13 @@ main:
         image: mobiledevops/android-sdk-image:34.0.1
         volumes:
           - /root/.gradle:cow
-          # 只缓存 NDK 子目录（镜像本身不含 ndk/，不会遮住镜像预装的 SDK）。
-          # 不要把数据卷挂到 /opt/android-sdk-linux 根目录：镜像的 cmdline-tools /
-          # platforms / licenses 都在那里，被卷覆盖后 sdkmanager 与 AGP 会找不到 SDK。
           - /opt/android-sdk-linux/ndk:cow
       stages:
-        # 补齐 platform 35 / build-tools 35 / NDK 28.2；已存在时秒过。
-        # 必须在这里校验 SDK 本身可用，否则后面只会得到难以定位的 Gradle 报错。
         - name: 预热 Android SDK（NDK）
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
-            # 当前镜像使用 cmdline-tools/bin；同时兼容官方 latest/版本号目录布局。
             SDKMAN=
             for candidate in "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
               if [ -x "$candidate" ]; then
@@ -29,8 +23,7 @@ main:
               fi
             done
             if [ -z "$SDKMAN" ]; then
-              echo "ERROR: 未找到可执行的 sdkmanager（已检查平铺、latest 和版本号目录）" >&2
-              echo "       请检查 $ANDROID_HOME/cmdline-tools 是否存在，以及 SDK 是否被数据卷遮挡。" >&2
+              echo "ERROR: 未找到可执行的 sdkmanager" >&2
               exit 1
             fi
             echo "sdkmanager: $SDKMAN"
@@ -41,20 +34,16 @@ main:
             if [ -d "$NDK" ] && [ -f "$NDK/source.properties" ]; then
               echo "NDK 28.2.13676358 已缓存（$NDK）"
             else
-              echo "NDK 缓存不存在或不完整，重新安装 28.2.13676358"
               rm -rf "$NDK"
               yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "ndk;28.2.13676358"
               test -f "$NDK/source.properties" || {
                 echo "ERROR: NDK 安装完成后仍缺少 source.properties：$NDK" >&2
                 exit 1
               }
-              echo "NDK 28.2.13676358 安装完成"
             fi
         - name: 验证内嵌 JRE 运行时
           script: |
             set -eu
-            export ANDROID_HOME=/opt/android-sdk-linux
-            export ANDROID_SDK_ROOT="$ANDROID_HOME"
             JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
             SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
             [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
@@ -64,7 +53,6 @@ main:
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
-            # CNB 出口访问 Maven Central 容易触发 429，统一走阿里云公共镜像。
             export MSLX_MAVEN_GOOGLE_MIRROR=https://maven.aliyun.com/repository/google
             export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
             chmod +x gradlew
@@ -74,11 +62,12 @@ main:
 
 $:
   tag_push:
-    - docker:
+    - imports:
+        - https://cnb.cool/MSLX-secrets/-/blob/main/keystore.yml
+      docker:
         image: mobiledevops/android-sdk-image:34.0.1
         volumes:
           - /root/.gradle:cow
-          # 同 main：只缓存 NDK 子目录，避免数据卷遮住镜像预装的 SDK（cmdline-tools 等）
           - /opt/android-sdk-linux/ndk:cow
       stages:
         - name: 预热 Android SDK（NDK）
@@ -86,7 +75,6 @@ $:
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
-            # 当前镜像使用 cmdline-tools/bin；同时兼容官方 latest/版本号目录布局。
             SDKMAN=
             for candidate in "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
               if [ -x "$candidate" ]; then
@@ -95,11 +83,9 @@ $:
               fi
             done
             if [ -z "$SDKMAN" ]; then
-              echo "ERROR: 未找到可执行的 sdkmanager（已检查平铺、latest 和版本号目录）" >&2
-              echo "       请检查 $ANDROID_HOME/cmdline-tools 是否存在，以及 SDK 是否被数据卷遮挡。" >&2
+              echo "ERROR: 未找到可执行的 sdkmanager" >&2
               exit 1
             fi
-            echo "sdkmanager: $SDKMAN"
             yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" --licenses > /dev/null 2>&1 || true
             yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools" \
               || echo "警告：platform/build-tools 预装失败，交由 AGP 自动下载" >&2
@@ -107,35 +93,31 @@ $:
             if [ -d "$NDK" ] && [ -f "$NDK/source.properties" ]; then
               echo "NDK 28.2.13676358 已缓存（$NDK）"
             else
-              echo "NDK 缓存不存在或不完整，重新安装 28.2.13676358"
               rm -rf "$NDK"
               yes | "$SDKMAN" --sdk_root="$ANDROID_HOME" "ndk;28.2.13676358"
               test -f "$NDK/source.properties" || {
                 echo "ERROR: NDK 安装完成后仍缺少 source.properties：$NDK" >&2
                 exit 1
               }
-              echo "NDK 28.2.13676358 安装完成"
             fi
         - name: 恢复签名密钥
           script: |
             set -eu
-            export ANDROID_HOME=/opt/android-sdk-linux
-            export ANDROID_SDK_ROOT="$ANDROID_HOME"
             if [ -z "${KEYSTORE_BASE64:-}" ]; then
-              echo "ERROR: KEYSTORE_BASE64 未配置（请在私有密钥仓库 MSLX-secrets 提供 keystore.yml）" >&2
+              echo "ERROR: KEYSTORE_BASE64 未注入（请检查密钥仓库 keystore.yml 及 allow_slugs）" >&2
               exit 1
             fi
             if [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
-              echo "ERROR: KEYSTORE_PASSWORD 或 KEY_PASSWORD 未配置" >&2
+              echo "ERROR: KEYSTORE_PASSWORD 或 KEY_PASSWORD 未注入" >&2
               exit 1
             fi
             mkdir -p keystore
             echo "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > keystore/release.jks || {
-              echo "ERROR: KEYSTORE_BASE64 解码失败，请更新为 Rolithax release JKS" >&2
+              echo "ERROR: KEYSTORE_BASE64 解码失败" >&2
               exit 1
             }
             keytool -list -keystore keystore/release.jks -storepass "$KEYSTORE_PASSWORD" -alias wludy > /dev/null 2>&1 || {
-              echo "ERROR: 签名密钥无效或缺少 wludy 别名，请更新 CNB 私有签名 Secrets" >&2
+              echo "ERROR: 签名密钥无效或缺少 wludy 别名" >&2
               exit 1
             }
             cat > keystore.properties <<EOF
@@ -148,24 +130,17 @@ $:
         - name: 验证内嵌 JRE 运行时
           script: |
             set -eu
-            export ANDROID_HOME=/opt/android-sdk-linux
-            export ANDROID_SDK_ROOT="$ANDROID_HOME"
             JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
             SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
             [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
             echo "$SHA  $JRE" | sha256sum -c -
 
-        # Java 21/25 运行时不入库、不进 APK。来源和摘要确认前只做可选探测，
-        # 不把缺失或未经验证的文件写入 Release 附件。
         - name: 获取可选运行时归档
           script: |
             set -eu
-            export ANDROID_HOME=/opt/android-sdk-linux
-            export ANDROID_SDK_ROOT="$ANDROID_HOME"
             CUR_TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]' | sort -V | tail -1 || true)
             [ -n "$CUR_TAG" ] || CUR_TAG="${CNB_BRANCH:-}"
             echo "当前 tag=$CUR_TAG"
-            # 第二来源：同一 tag 的 GitHub Release 附件（GitHub 流水线先跑完时可命中）
             if [ -n "$CUR_TAG" ]; then
               GH_BASE="https://github.com/WLudy1012/MSLX_APP-Android/releases/download/$CUR_TAG"
             else
@@ -189,7 +164,6 @@ $:
               echo "ERROR: $name 下载或 SHA-256 校验失败（已尝试全部来源）" >&2
               return 1
             }
-            # 上游镜像不可用时不阻断 APK 构建；未取得可信归档就不生成附件，客户端仍会拒绝无摘要安装。
             fetch_verified \
               jre21-arm64-20260223-release.tar.xz \
               d055fc953771e6cfd2206ef770ca675d69b5e4cfd9f3f1e6820ba5820c3cc1dc \
@@ -200,18 +174,12 @@ $:
               0fdf6d19fe66ea61c12caa24bd655227ddb0d7d9c16c0f13281a7c2878635286 \
               "https://pan.huang1111.cn/f/5NOltm/jre25-arm64-20260223-release.tar.xz" \
               "$GH_BASE/jre25-arm64-20260223-release.tar.xz" || echo "WARNING: Java 25 归档暂不可用，跳过附件"
-            # Java 8 归档（ZalithLauncher 运行时）不在本流水线镜像：
-            # 客户端 LocalJreManager 已内置 jsDelivr / raw.githubusercontent 直连兜底，
-            # 这里再引入 jsDelivr 依赖只会让发版多一个可能失败的环节。
 
-        # 同一 Release 发布两个变体：app-release.apk（完整版，内嵌 JRE）与
-        # app-release-lite.apk（精简版，不含 JRE）。
         - name: 构建签名 Release APK（完整版，内嵌 JRE）
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
-            # CNB 出口访问 Maven Central 容易触发 429，Release 与 main 使用同一镜像。
             export MSLX_MAVEN_GOOGLE_MIRROR=https://maven.aliyun.com/repository/google
             export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
             [ -f keystore.properties ] || { echo "ERROR: 签名配置缺失，禁止发布未签名包" >&2; exit 1; }
@@ -226,8 +194,6 @@ $:
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
             export MSLX_MAVEN_GOOGLE_MIRROR=https://maven.aliyun.com/repository/google
             export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
-            # -PwithoutJre=true 会改变 main 源集的 assets，Gradle 会重建 mergeAssets/package，
-            # 因此直接构建即可；完整版已在上一步单独 cp 成 app-release.apk。
             ./gradlew assembleRelease -PwithoutJre=true --no-daemon --stacktrace
             cp app/build/outputs/apk/release/app-release.apk ./app-release-lite.apk
             ls -lh app-release.apk app-release-lite.apk
@@ -242,12 +208,10 @@ $:
             CUR_TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]' | sort -V | tail -1 || true)
             [ -n "$CUR_TAG" ] || CUR_TAG="${CNB_BRANCH:-unknown}"
             git fetch --tags --force --quiet 2>/dev/null || true
-            # 兜底：tag 未同步到本地时用 HEAD，保证 git log 不会因"未知修订号"整段失败
             REV="$CUR_TAG"
             git rev-parse --verify --quiet "${CUR_TAG}^{commit}" > /dev/null || REV=HEAD
             IS_BETA=$(echo "$CUR_TAG" | grep -qiE -- '-beta$' && echo 1 || echo 0)
             if [ "$IS_BETA" = "1" ]; then
-              # Beta：上一版 = 最近一个 Beta tag；没有则回退到最近一个正式 tag
               PREV_TAG=$(git tag --list 'v*' | grep -iE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1 || true)
               if [ -z "$PREV_TAG" ]; then
                 PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1 || true)
@@ -264,7 +228,6 @@ $:
                 echo ""
                 git log --no-merges --pretty=format:"- %s" "${PREV_TAG}..${REV}"
               else
-                # 绝不回退成"列出全部历史提交"
                 echo "> 未能确定上一版本 tag（首个版本或 tag 未同步），仅列出最近 15 条提交。"
                 echo ""
                 git log -n 15 --no-merges --pretty=format:"- %s" "${REV}"
